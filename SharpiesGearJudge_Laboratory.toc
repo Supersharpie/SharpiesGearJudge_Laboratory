@@ -1,0 +1,6 @@
+## Interface: 20504
+## Title: Sharpie's Gear Judge [Laboratory]
+## Dependencies: SharpiesGearJudge
+## SavedVariables: SGJ_LaboratoryDB
+
+Laboratory.lua
