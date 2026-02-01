@@ -1,0 +1,20 @@
+name: Publish to CurseForge
+on:
+  release:
+    types: [published]
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and Upload
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -p 1451485
+        env:
+          CF_API_KEY: ${{ secrets.CURSEFORGE_TOKEN }}
