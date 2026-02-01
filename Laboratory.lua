@@ -244,17 +244,23 @@ end
 
 function SGF.UpdateStatList(stats1, stats2, weights)
     local MSC = _G.MSC
-    local content = MSC.ViewLaboratory.StatScroll.Content
-    local width = content:GetWidth() -- Get actual width
+    local scrollFrame = MSC.ViewLaboratory.StatScroll
+    local content = scrollFrame.Content
+    
+    -- FIX 1: Increase buffer from 25 to 45 to strictly clear the scrollbar
+    local availableWidth = scrollFrame:GetWidth() - 5
+    
+    -- Safety check to prevent errors if UI hasn't fully rendered width yet
+    if availableWidth < 100 then availableWidth = 200 end 
+
+    content:SetWidth(availableWidth)
     
     for _, row in ipairs(SGF.StatRows) do row:Hide() end
     
-    -- 1. Aggregate keys
     local allKeys = {}
     for k, _ in pairs(stats1) do allKeys[k] = true end
     for k, _ in pairs(stats2) do allKeys[k] = true end
     
-    -- 2. Build Table
     local data = {}
     for statKey, _ in pairs(allKeys) do
         local w = weights[statKey] or 0
@@ -265,44 +271,49 @@ function SGF.UpdateStatList(stats1, stats2, weights)
         end
     end
     
-    -- 3. Sort
     table.sort(data, function(a,b) 
         if a.isWeighted ~= b.isWeighted then return a.isWeighted end
         if a.isWeighted then return a.weight > b.weight else return a.key < b.key end
     end)
     
-    -- 4. Render
     local yOff = 0
     for i, d in ipairs(data) do
         local row = SGF.StatRows[i]
         if not row then
             row = CreateFrame("Frame", nil, content)
-            row:SetSize(width, 16) 
+            row:SetHeight(16) 
+            row:SetPoint("LEFT", 0, 0)
+            row:SetPoint("RIGHT", 0, 0)
             
             row.Name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            row.Name:SetPoint("LEFT", 5, 0)
-            row.Name:SetWidth(width * 0.45) -- Name takes 45% width
+            row.Name:SetPoint("LEFT", 2, 0)
+            -- FIX 2: Reduce Name width to 35% to give numbers more room
+            row.Name:SetWidth(availableWidth * 0.35) 
             row.Name:SetJustifyH("LEFT")
             row.Name:SetWordWrap(false)
             
             row.Val = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            -- FIX 3: Anchor -5 pixels from the NEW (narrower) right edge
             row.Val:SetPoint("RIGHT", -5, 0)
-            row.Val:SetWidth(width * 0.55) -- Value takes 55% width
+            -- FIX 4: Give Value 65% of the width
+            row.Val:SetWidth(availableWidth * 0.65)
             row.Val:SetJustifyH("RIGHT")
             
             SGF.StatRows[i] = row
         end
         
         row:SetPoint("TOPLEFT", 0, yOff)
-        row:SetWidth(width) -- Ensure row fills scroll
         row:Show()
         
+        -- Clean up names
         local cleanName = MSC.GetCleanStatName(d.key)
         cleanName = cleanName:gsub(" Rating", ""):gsub(" Spell", ""):gsub("Defense", "Def"):gsub("Attack Power", "AP")
         row.Name:SetText(cleanName)
         
+        -- Color weighted stats
         if d.isWeighted then row.Name:SetTextColor(1, 0.82, 0) else row.Name:SetTextColor(0.6, 0.6, 0.6) end
         
+        -- Calculate Diff
         local diff = d.v2 - d.v1
         local diffText = ""
         if diff > 0.01 then diffText = "|cff00ff00+"..string.format("%.0f", diff).."|r"
@@ -310,14 +321,18 @@ function SGF.UpdateStatList(stats1, stats2, weights)
         else diffText = "-"
         end
         
-        -- Compact format: "100 / 120 (+20)"
+        -- Format: "10 / 12 (+2)"
         row.Val:SetText(string.format("%.0f / %.0f (%s)", d.v1, d.v2, diffText))
         
+        -- Striping
         if not row.bg then row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints(); row.bg:SetColorTexture(1, 1, 1, 0.03) end
         if i % 2 == 0 then row.bg:Show() else row.bg:Hide() end
         
         yOff = yOff - 18
     end
+    
+    -- FIX 5: Ensure scrolling works by setting content height
+    content:SetHeight(math.abs(yOff))
 end
 
 -- [[ 4. SAVE / LOAD / DELETE / EXPORT ]]
@@ -513,7 +528,7 @@ function SGF.CreateCopyPastePopup()
     f:Hide(); SGF.Popup = f; return f
 end
 
--- [[ 5. UI CONSTRUCTION (FINAL WIDTH FIX) ]]
+-- [[ 5. UI CONSTRUCTION ]]
 function SGF.InitLaboratoryView(parent)
     local MSC = _G.MSC
     local f = CreateFrame("Frame", nil, parent); f:SetAllPoints(); f:Hide()
@@ -521,17 +536,22 @@ function SGF.InitLaboratoryView(parent)
     f.Title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.Title:SetPoint("TOPLEFT", 20, -12); f.Title:SetText("The Laboratory (Comparator)")
 
+    -- [[ LAYOUT ADJUSTMENT: BALANCED ]]
+    -- Set 1 stays at 30
     local set1Origin = { x = 30, y = -65 }
-    local set2Origin = { x = 250, y = -65 } 
+    -- Set 2 moved to 220 (Previous: 250 [Too Wide], Recent: 190 [Too Tight])
+    local set2Origin = { x = 220, y = -65 } 
     
+    -- Keep the tighter column gap (85) as that looked good
+    local col2X = 85 
     local dollCoords = {
         HeadSlot = {x=0, y=0}, NeckSlot = {x=0, y=-38}, ShoulderSlot = {x=0, y=-76}, BackSlot = {x=0, y=-114}, ChestSlot = {x=0, y=-152}, WristSlot = {x=0, y=-190},
         MainHandSlot = {x=0, y=-228}, SecondaryHandSlot = {x=0, y=-266}, RangedSlot = {x=0, y=-304}, 
-        HandsSlot = {x=100, y=0}, WaistSlot = {x=100, y=-38}, LegsSlot = {x=100, y=-76}, FeetSlot = {x=100, y=-114}, Finger0Slot = {x=100, y=-152}, Finger1Slot = {x=100, y=-190}, Trinket0Slot = {x=100, y=-228}, Trinket1Slot = {x=100, y=-266},
+        HandsSlot = {x=col2X, y=0}, WaistSlot = {x=col2X, y=-38}, LegsSlot = {x=col2X, y=-76}, FeetSlot = {x=col2X, y=-114}, Finger0Slot = {x=col2X, y=-152}, Finger1Slot = {x=col2X, y=-190}, Trinket0Slot = {x=col2X, y=-228}, Trinket1Slot = {x=col2X, y=-266},
     }
 
-    f.Set1Btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.Set1Btn:SetSize(70, 22); f.Set1Btn:SetPoint("TOPLEFT", set1Origin.x + 30, -35); f.Set1Btn:SetText("Set 1")
-    f.Set2Btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.Set2Btn:SetSize(70, 22); f.Set2Btn:SetPoint("TOPLEFT", set2Origin.x + 30, -35); f.Set2Btn:SetText("Set 2")
+    f.Set1Btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.Set1Btn:SetSize(70, 22); f.Set1Btn:SetPoint("TOPLEFT", set1Origin.x + 10, -35); f.Set1Btn:SetText("Set 1")
+    f.Set2Btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.Set2Btn:SetSize(70, 22); f.Set2Btn:SetPoint("TOPLEFT", set2Origin.x + 10, -35); f.Set2Btn:SetText("Set 2")
 
     local function UpdateActiveSetUI()
         if SGF.ActiveSet == 1 then f.Set1Btn:LockHighlight(); f.Set2Btn:UnlockHighlight(); f.Set1Btn.Text:SetTextColor(1,1,0); f.Set2Btn.Text:SetTextColor(1,1,1)
@@ -568,17 +588,20 @@ function SGF.InitLaboratoryView(parent)
         if MSC.CurrentClass and MSC.CurrentClass.Weights then for k, v in pairs(MSC.CurrentClass.Weights) do local info = UIDropDownMenu_CreateInfo(); local pretty = (MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[k]) or k; info.text = pretty; info.func = function() SGF.SelectedProfile = k; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == k); UIDropDownMenu_AddButton(info, level) end end
     end)
 
-    f.ScoreVal1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal1:SetPoint("TOPLEFT", set1Origin.x + 40, -405); f.ScoreVal1:SetText("0"); f.ScoreVal1:SetTextColor(1,1,0)
-    f.ScoreVal2 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal2:SetPoint("TOPLEFT", set2Origin.x + 40, -405); f.ScoreVal2:SetText("0"); f.ScoreVal2:SetTextColor(1,1,0)
-    f.DiffVal = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); f.DiffVal:SetPoint("TOP", f, "TOP", 0, -430); f.DiffVal:SetText("Ready")
+    f.ScoreVal1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal1:SetPoint("TOPLEFT", set1Origin.x + 20, -405); f.ScoreVal1:SetText("0"); f.ScoreVal1:SetTextColor(1,1,0)
+    f.ScoreVal2 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal2:SetPoint("TOPLEFT", set2Origin.x + 20, -405); f.ScoreVal2:SetText("0"); f.ScoreVal2:SetTextColor(1,1,0)
+    
+    -- Center diff text between 140 (approx middle)
+    f.DiffVal = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); f.DiffVal:SetPoint("TOPLEFT", 140, -430); f.DiffVal:SetText("Ready")
 
-    -- [[ WIDER SCROLL FRAME ]]
+    -- [[ SCROLL FRAME BALANCED ]]
     local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    -- Moved X to 380 (was 415) to give more room
-    scroll:SetPoint("TOPLEFT", 380, -45); scroll:SetPoint("BOTTOMRIGHT", -30, 90) 
+    -- Moved X to 350 (Previous: 380 [Text Cut], Recent: 320 [Too Wide])
+    -- This gives the dolls more room but keeps text readable.
+    scroll:SetPoint("TOPLEFT", 375, -45); scroll:SetPoint("BOTTOMRIGHT", -30, 90) 
     f.StatScroll = scroll
     f.StatScroll.Content = CreateFrame("Frame", nil, scroll)
-    f.StatScroll.Content:SetSize(230, 600) -- Widen content to 230
+    f.StatScroll.Content:SetSize(230, 600) 
     scroll:SetScrollChild(f.StatScroll.Content)
 
     local yR1 = 50
