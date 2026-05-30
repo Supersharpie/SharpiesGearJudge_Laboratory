@@ -1,4 +1,11 @@
-[v2.1.0]
+## [v2.0.1]
+
+* **Revamped the Export/Import popup: use BackdropTemplate and the DialogBox backdrop for standard borders, adjust layout and title positioning, resize the editbox/scroll area, and reposition the Import button.**
+* **Added Escape handling to clear focus and close the popup, and refocus the editbox on mouse down to avoid focus issues.**
+* **Minor cleanup and bugfixes around popup behavior.**
+
+
+## [v2.0.0]
 
 # Feature Update: Best in Bag Scanner & In-Game Help
 
@@ -15,12 +22,3 @@
 ## UI & Under-the-Hood
 * Adjusted the bottom control row layout to cleanly accommodate the new "Best in Bag" button alongside the Import and Load dropdowns.
 * Implemented combat lockdown checks to prevent Lua errors if a user attempts to Shift-Click auto-equip while in combat.
-
-[v2.0.0]
-
-Initial Release: Launched the Laboratory plugin for the WoW Classic TBC Anniversary Server.
-Comparison Engine: Integrated with the core SGJ scoring system to provide "Set 1 vs Set 2" score deltas.
-**Import Logic: Support for SeventyUpgrades (JSON), SimC/Raidbots strings, and generic item ID lists.
-**UI Components: Created a dual-doll interface with a scrollable stat comparison window.
-**Database Management: Implemented local character saving/loading for theorycrafted gear sets.
-**Smart Handling: Logic for 2H weapons automatically removing off-hands and intelligent ring/trinket slotting.

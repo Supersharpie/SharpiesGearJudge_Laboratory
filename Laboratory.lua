@@ -506,16 +506,71 @@ end
 
 function SGF.CreateCopyPastePopup()
     if SGF.Popup then return SGF.Popup end
-    local f = CreateFrame("Frame", "SGJ_CopyPastePopup", UIParent); f:SetSize(400, 300); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG"); f:EnableMouse(true)
-    f.bg = f:CreateTexture(nil, "BACKGROUND"); f.bg:SetAllPoints(f); f.bg:SetColorTexture(0, 0, 0, 0.9)
-    f.Title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge"); f.Title:SetPoint("TOP", 0, -10); f.Title:SetText("Export / Import")
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", -5, -5)
-    local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate"); scroll:SetPoint("TOPLEFT", 20, -40); scroll:SetPoint("BOTTOMRIGHT", -40, 50)
-    local eb = CreateFrame("EditBox", nil, scroll); eb:SetSize(340, 400); eb:SetMultiLine(true); eb:SetFontObject("GameFontHighlight"); eb:SetAutoFocus(false); scroll:SetScrollChild(eb); f.EditBox = eb
-    local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); btn:SetSize(100, 25); btn:SetPoint("BOTTOM", 0, 15); btn:SetText("Import This")
-    btn:SetScript("OnClick", function() local text = eb:GetText(); SGF.DeserializeSet(text); f:Hide() end); f.ImportBtn = btn
-    f.Hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.Hint:SetPoint("BOTTOM", 0, 45); f.Hint:SetText("Press Ctrl+C to Copy or Ctrl+V to Paste"); f.Hint:SetTextColor(0.6, 0.6, 0.6)
-    f:Hide(); SGF.Popup = f; return f
+    
+    -- Added BackdropTemplate to support standard UI borders
+    local f = CreateFrame("Frame", "SGJ_CopyPastePopup", UIParent, "BackdropTemplate")
+    f:SetSize(400, 300)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:EnableMouse(true)
+    
+    -- Replace the plain black texture with the classic DialogBox style used in your Help menu
+    f:SetBackdrop({
+        bgFile="Interface\\DialogFrame\\UI-DialogBox-Background", 
+        edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border", 
+        tile=true, tileSize=32, edgeSize=32, 
+        insets={left=11, right=12, top=12, bottom=11}
+    })
+
+    f.Title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.Title:SetPoint("TOP", 0, -20) -- Adjusted slightly down for the new border
+    f.Title:SetText("Export / Import")
+    
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -5, -5)
+    
+    local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 25, -50)
+    scroll:SetPoint("BOTTOMRIGHT", -40, 50)
+    
+    local eb = CreateFrame("EditBox", nil, scroll)
+    eb:SetSize(330, 400)
+    eb:SetMultiLine(true)
+    eb:SetFontObject("GameFontHighlight")
+    eb:SetAutoFocus(false)
+    scroll:SetScrollChild(eb)
+    f.EditBox = eb
+
+    -- QUALITY OF LIFE: Allow pressing Escape to clear focus and close the popup
+    eb:SetScript("OnEscapePressed", function(self) 
+        self:ClearFocus()
+        f:Hide() 
+    end)
+
+    -- BUG FIX: Clicking anywhere on the main window will refocus the text box
+    f:SetScript("OnMouseDown", function() 
+        eb:SetFocus() 
+    end)
+
+    local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btn:SetSize(100, 25)
+    btn:SetPoint("BOTTOM", 0, 20)
+    btn:SetText("Import This")
+    btn:SetScript("OnClick", function() 
+        local text = eb:GetText()
+        SGF.DeserializeSet(text)
+        f:Hide() 
+    end)
+    f.ImportBtn = btn
+    
+    f.Hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.Hint:SetPoint("BOTTOM", 0, 50)
+    f.Hint:SetText("Press Ctrl+C to Copy or Ctrl+V to Paste")
+    f.Hint:SetTextColor(0.6, 0.6, 0.6)
+    
+    f:Hide()
+    SGF.Popup = f
+    return f
 end
 
 -- [[ 4.5 BEST IN BAG SCANNER ]]
