@@ -1,11 +1,11 @@
-## [v2.0.1]
+## [v2.1.1]
 
 * **Revamped the Export/Import popup: use BackdropTemplate and the DialogBox backdrop for standard borders, adjust layout and title positioning, resize the editbox/scroll area, and reposition the Import button.**
 * **Added Escape handling to clear focus and close the popup, and refocus the editbox on mouse down to avoid focus issues.**
 * **Minor cleanup and bugfixes around popup behavior.**
 
 
-## [v2.0.0]
+## [v2.1.0]
 
 # Feature Update: Best in Bag Scanner & In-Game Help
 
