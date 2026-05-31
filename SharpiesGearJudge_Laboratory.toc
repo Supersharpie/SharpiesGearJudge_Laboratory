@@ -1,6 +1,6 @@
 ## Interface: 20505
 ## Title: Sharpie's Gear Judge [Laboratory]
-## Version: 2.0.1
+## Version: 2.1.1
 ## Author: Supersharpie
 ## Dependencies: SharpiesGearJudge
 ## SavedVariables: SGJ_LaboratoryDB
