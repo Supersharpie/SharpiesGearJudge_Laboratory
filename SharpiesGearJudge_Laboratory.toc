@@ -1,9 +1,0 @@
-## Interface: 20505
-## Title: Sharpie's Gear Judge [Laboratory]
-## Version: 2.1.1
-## Author: Supersharpie
-## Dependencies: SharpiesGearJudge
-## SavedVariables: SGJ_LaboratoryDB
-## X-Curse-Project-ID: 1451485
-
-Laboratory.lua
