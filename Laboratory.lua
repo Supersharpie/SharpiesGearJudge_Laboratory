@@ -958,13 +958,26 @@ regFrame:SetScript("OnEvent", function()
         if MSC.RenderSidebarButtons then MSC.RenderSidebarButtons() end
         
         hooksecurefunc("SetItemRef", function(link) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then SGF.ReceiveLink(link) end end)
-        hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self) 
-            if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then 
-                local b,s = self:GetParent():GetID(), self:GetID()
-                local l = (C_Container and C_Container.GetContainerItemLink) and C_Container.GetContainerItemLink(b,s) or GetContainerItemLink(b,s)
-                if l then SGF.ReceiveLink(l) end 
-            end 
-        end)
-        hooksecurefunc("PaperDollItemSlotButton_OnModifiedClick", function(self) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then local link = GetInventoryItemLink("player", self:GetID()); if link then SGF.ReceiveLink(link) end end end)
+        if type(ContainerFrameItemButton_OnModifiedClick) == "function" then
+            hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self) 
+                if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then 
+                    local b,s = self:GetParent():GetID(), self:GetID()
+                    local l = (C_Container and C_Container.GetContainerItemLink) and C_Container.GetContainerItemLink(b,s) or GetContainerItemLink(b,s)
+                    if l then SGF.ReceiveLink(l) end 
+                end 
+            end)
+        end
+        if type(ContainerFrameItemButtonTemplate_OnModifiedClick) == "function" then
+            hooksecurefunc("ContainerFrameItemButtonTemplate_OnModifiedClick", function(self) 
+                if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then 
+                    local b,s = self:GetParent():GetID(), self:GetID()
+                    local l = (C_Container and C_Container.GetContainerItemLink) and C_Container.GetContainerItemLink(b,s) or GetContainerItemLink(b,s)
+                    if l then SGF.ReceiveLink(l) end 
+                end 
+            end)
+        end
+        if type(PaperDollItemSlotButton_OnModifiedClick) == "function" then
+            hooksecurefunc("PaperDollItemSlotButton_OnModifiedClick", function(self) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then local link = GetInventoryItemLink("player", self:GetID()); if link then SGF.ReceiveLink(link) end end end)
+        end
     end
 end)
