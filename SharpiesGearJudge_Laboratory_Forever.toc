@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Sharpie's Gear Judge [Laboratory] (Forever Edition)
-## Version: 3.0.0-Forever
+## Version: 3.0.5-Forever
 ## Author: Supersharpie
 ## Dependencies: SharpiesGearJudge
 ## SavedVariables: SGJ_LaboratoryDB
