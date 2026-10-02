@@ -957,7 +957,9 @@ regFrame:SetScript("OnEvent", function()
         MSC.RegisterPluginTab("The Lab", "Interface\\Icons\\INV_Chest_Plate04", SGF.InitLaboratoryView, "ViewLaboratory", "UpdateLaboratory")
         if MSC.RenderSidebarButtons then MSC.RenderSidebarButtons() end
         
-        hooksecurefunc("SetItemRef", function(link) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then SGF.ReceiveLink(link) end end)
+        if type(SetItemRef) == "function" then
+            hooksecurefunc("SetItemRef", function(link) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then SGF.ReceiveLink(link) end end)
+        end
         if type(ContainerFrameItemButton_OnModifiedClick) == "function" then
             hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self) 
                 if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then 

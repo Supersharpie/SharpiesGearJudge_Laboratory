@@ -1,3 +1,17 @@
+## 🚀 v3.0.7
+
+### 🐛 Bug Fixes
+- **Loads on WoW Forever**: The Forever client reads the plain `.toc` file, which only listed the TBC client, so the Laboratory showed as Incompatible. It now lists both.
+
+---
+
+## 🚀 v3.0.6
+
+### 🐛 Bug Fixes
+- **Survives Removed Blizzard APIs**: The chat-link hook (`SetItemRef`) is only attached when the client still has that function. Equipping from the Lab falls back to `C_Item.EquipItemByName` through the core addon's polyfill, so it keeps working on clients that remove the old global.
+
+---
+
 ## 🚀 v3.0.0
 
 ### 🧪 Core Engine Migration
