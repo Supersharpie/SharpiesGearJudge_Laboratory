@@ -240,25 +240,28 @@ function SGF.CalculateLabScore()
     SGF.UpdateStatList(stats1, stats2, weights)
 end
 
+-- Stat comparison columns, measured from the right edge of each row (headings in InitLaboratoryView use the same values)
+SGF.STAT_COL_W = 34
+SGF.STAT_COL_DIFF = -2
+SGF.STAT_COL_V2 = -38
+SGF.STAT_COL_V1 = -74
+local STAT_NAME_RIGHT = -110
+
 function SGF.UpdateStatList(stats1, stats2, weights)
     local MSC = _G.MSC
     local scrollFrame = MSC.ViewLaboratory.StatScroll
     local content = scrollFrame.Content
-    
-    -- Increase buffer from 25 to 45 to strictly clear the scrollbar
-    local availableWidth = scrollFrame:GetWidth() - 5
-    
-    -- Safety check to prevent errors if UI hasn't fully rendered width yet
-    if availableWidth < 100 then availableWidth = 200 end 
 
-    content:SetWidth(availableWidth)
-    
+    -- Rows stretch with the content, which follows the scroll frame's width (OnSizeChanged in InitLaboratoryView)
+    local scrollW = scrollFrame:GetWidth()
+    if scrollW and scrollW > 50 then content:SetWidth(scrollW) end
+
     for _, row in ipairs(SGF.StatRows) do row:Hide() end
-    
+
     local allKeys = {}
     for k, _ in pairs(stats1) do allKeys[k] = true end
     for k, _ in pairs(stats2) do allKeys[k] = true end
-    
+
     local data = {}
     for statKey, _ in pairs(allKeys) do
         local w = weights[statKey] or 0
@@ -268,62 +271,70 @@ function SGF.UpdateStatList(stats1, stats2, weights)
             table.insert(data, { key=statKey, weight=w, v1=v1, v2=v2, isWeighted=(w>0) })
         end
     end
-    
-    table.sort(data, function(a,b) 
+
+    table.sort(data, function(a,b)
         if a.isWeighted ~= b.isWeighted then return a.isWeighted end
         if a.isWeighted then return a.weight > b.weight else return a.key < b.key end
     end)
-    
+
+    local function Cell(row, rightOff)
+        local t = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        t:SetPoint("RIGHT", row, "RIGHT", rightOff, 0); t:SetWidth(SGF.STAT_COL_W); t:SetJustifyH("RIGHT")
+        return t
+    end
+
     local yOff = 0
     for i, d in ipairs(data) do
         local row = SGF.StatRows[i]
         if not row then
             row = CreateFrame("Frame", nil, content)
-            row:SetHeight(16) 
-            row:SetPoint("LEFT", 0, 0)
-            row:SetPoint("RIGHT", 0, 0)
-            
+            row:SetHeight(16)
+
             row.Name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             row.Name:SetPoint("LEFT", 2, 0)
-            row.Name:SetWidth(availableWidth * 0.35) 
+            row.Name:SetPoint("RIGHT", row, "RIGHT", STAT_NAME_RIGHT, 0)
             row.Name:SetJustifyH("LEFT")
             row.Name:SetWordWrap(false)
-            
-            row.Val = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            row.Val:SetPoint("RIGHT", -5, 0)
-            row.Val:SetWidth(availableWidth * 0.65)
-            row.Val:SetJustifyH("RIGHT")
-            
+
+            row.V1 = Cell(row, SGF.STAT_COL_V1)
+            row.V2 = Cell(row, SGF.STAT_COL_V2)
+            row.Diff = Cell(row, SGF.STAT_COL_DIFF)
+
+            row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints(); row.bg:SetColorTexture(1, 1, 1, 0.03)
             SGF.StatRows[i] = row
         end
-        
-        row:SetPoint("TOPLEFT", 0, yOff)
+
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
+        row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, yOff)
         row:Show()
-        
+
         local cleanName = MSC.GetCleanStatName(d.key)
         cleanName = cleanName:gsub(" Rating", ""):gsub(" Spell", ""):gsub("Defense", "Def"):gsub("Attack Power", "AP")
         row.Name:SetText(cleanName)
-        
+
         -- Color weighted stats
         if d.isWeighted then row.Name:SetTextColor(1, 0.82, 0) else row.Name:SetTextColor(0.6, 0.6, 0.6) end
-        
+
         -- Calculate Diff
         local diff = d.v2 - d.v1
         local diffText = ""
         if diff > 0.01 then diffText = "|cff00ff00+"..string.format("%.0f", diff).."|r"
         elseif diff < -0.01 then diffText = "|cffff0000"..string.format("%.0f", diff).."|r"
-        else diffText = "-"
+        else diffText = "|cff888888-|r"
         end
-        
-        row.Val:SetText(string.format("%.0f / %.0f (%s)", d.v1, d.v2, diffText))
-        
-        if not row.bg then row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints(); row.bg:SetColorTexture(1, 1, 1, 0.03) end
+
+        row.V1:SetText(string.format("%.0f", d.v1))
+        row.V2:SetText(string.format("%.0f", d.v2))
+        row.Diff:SetText(diffText)
+
         if i % 2 == 0 then row.bg:Show() else row.bg:Hide() end
-        
+
         yOff = yOff - 18
     end
-    
-    content:SetHeight(math.abs(yOff))
+
+    content:SetHeight(math.max(1, math.abs(yOff)))
+    if MSC.ViewLaboratory.StatEmpty then MSC.ViewLaboratory.StatEmpty:SetShown(#data == 0) end
 end
 
 -- [[ 4. SAVE / LOAD / DELETE / EXPORT ]]
@@ -827,43 +838,167 @@ function SGF.ToggleHelp()
 end
 
 -- [[ 5. UI CONSTRUCTION ]]
+-- Layout: profile and actions (left) | the two sets side by side (centre) | stat comparison (right)
+local LAB_LEFT_W, LAB_RIGHT_W = 190, 250
+
 function SGF.InitLaboratoryView(parent)
     local MSC = _G.MSC
     local f = CreateFrame("Frame", nil, parent); f:SetAllPoints(); f:Hide()
-    
-    f.Title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    f.Title:SetPoint("TOPLEFT", 20, -12); f.Title:SetText("The Laboratory (Comparator)")
 
-    -- [[ LAYOUT ADJUSTMENT: BALANCED ]]
-    local set1Origin = { x = 30, y = -65 }
-    local set2Origin = { x = 220, y = -65 } 
-    
-    local col2X = 85 
+    -- ==========================================
+    -- COLUMNS
+    -- ==========================================
+    local L = CreateFrame("Frame", nil, f)
+    L:SetPoint("TOPLEFT"); L:SetPoint("BOTTOMLEFT"); L:SetWidth(LAB_LEFT_W)
+    local R = CreateFrame("Frame", nil, f)
+    R:SetPoint("TOPRIGHT"); R:SetPoint("BOTTOMRIGHT"); R:SetWidth(LAB_RIGHT_W)
+    local C = CreateFrame("Frame", nil, f)
+    C:SetPoint("TOPLEFT", L, "TOPRIGHT"); C:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT")
+    for _, col in ipairs({ L, R }) do
+        local shade = col:CreateTexture(nil, "BACKGROUND"); shade:SetAllPoints(); shade:SetColorTexture(0, 0, 0, 0.25)
+    end
+    local function Divider(col, side)
+        local t = col:CreateTexture(nil, "BORDER"); t:SetColorTexture(1, 1, 1, 0.08); t:SetWidth(1)
+        t:SetPoint("TOP" .. side, 0, 0); t:SetPoint("BOTTOM" .. side, 0, 0)
+    end
+    Divider(L, "RIGHT"); Divider(R, "LEFT")
+
+    local BTN_W = LAB_LEFT_W - 24
+    local function Header(text, anchor, yOff)
+        local h = L:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        if anchor then h:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff) else h:SetPoint("TOPLEFT", 12, -12) end
+        h:SetText(text)
+        return h
+    end
+    local function Button(text, anchor, yOff, onClick)
+        local b = CreateFrame("Button", nil, L, "UIPanelButtonTemplate")
+        b:SetSize(BTN_W, 22); b:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff); b:SetText(text)
+        if onClick then b:SetScript("OnClick", onClick) end
+        return b
+    end
+
+    -- ==========================================
+    -- LEFT: TITLE, PROFILE, ACTIONS, SAVED SETS
+    -- ==========================================
+    f.Title = Header("The Laboratory")
+
+    -- In-Game Help Button
+    f.HelpBtn = CreateFrame("Button", nil, L, "UIPanelButtonTemplate")
+    f.HelpBtn:SetSize(22, 22)
+    f.HelpBtn:SetPoint("TOPRIGHT", -12, -8)
+    f.HelpBtn:SetText("?")
+    f.HelpBtn:SetScript("OnClick", function() SGF.ToggleHelp() end)
+    f.HelpBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Help & Instructions")
+        GameTooltip:Show()
+    end)
+    f.HelpBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+    local profLbl = L:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    profLbl:SetPoint("TOPLEFT", f.Title, "BOTTOMLEFT", 0, -12); profLbl:SetText("Scoring Profile"); profLbl:SetTextColor(0.6, 0.6, 0.6)
+    f.SpecDD = CreateFrame("Frame", "SGJ_LaboratorySpecDD", L, "UIDropDownMenuTemplate"); f.SpecDD:SetPoint("TOPLEFT", profLbl, "BOTTOMLEFT", -18, -2)
+    UIDropDownMenu_SetWidth(f.SpecDD, BTN_W - 16); UIDropDownMenu_SetText(f.SpecDD, "Follow Main Addon")
+	UIDropDownMenu_Initialize(f.SpecDD, function(self, level)
+        local info = UIDropDownMenu_CreateInfo(); info.text = "Follow Main Addon"; info.func = function() SGF.SelectedProfile = "Global"; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == "Global" or SGF.SelectedProfile == nil); UIDropDownMenu_AddButton(info, level)
+        if MSC.CurrentClass and MSC.CurrentClass.Weights then for k, v in pairs(MSC.CurrentClass.Weights) do local info = UIDropDownMenu_CreateInfo(); local pretty = (MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[k]) or k; info.text = pretty; info.func = function() SGF.SelectedProfile = k; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == k); UIDropDownMenu_AddButton(info, level) end end
+    end)
+
+    -- Add items to the active set
+    local hAdd = Header("Add to Active Set", profLbl, -46)
+    f.ActiveLbl = L:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.ActiveLbl:SetPoint("TOPLEFT", hAdd, "BOTTOMLEFT", 0, -3)
+    f.ActiveLbl:SetWidth(BTN_W); f.ActiveLbl:SetJustifyH("LEFT"); f.ActiveLbl:SetTextColor(0.6, 0.6, 0.6)
+    f.ActiveLbl:SetText("Shift-click items in your bags or chat. Pick the set with its button above the gear.")
+    f.ImportBtn = Button("Equipped", f.ActiveLbl, -8, function() SGF.ImportEquipped() end)
+
+    -- Best in Bag Button (Shift-Click enabled)
+    f.BagBtn = Button("Best in Bag", f.ImportBtn, -4)
+    f.BagBtn:SetScript("OnClick", function()
+        local autoEquip = IsShiftKeyDown()
+        SGF.ScanBestInBags(autoEquip)
+    end)
+    f.BagBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Best in Bag")
+        GameTooltip:AddLine("Scans bags to populate the current Lab Set", 1, 1, 1)
+        GameTooltip:AddLine("with your highest-scoring available gear.", 1, 1, 1)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("<Shift-Click> to also auto-equip the items.", 0, 1, 0)
+        GameTooltip:Show()
+    end)
+    f.BagBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+    f.ImpStrBtn = Button("Import String", f.BagBtn, -4, function() local p = SGF.CreateCopyPastePopup(); p.EditBox:SetText(""); p.ImportBtn:Show(); p.Title:SetText("Paste to Set "..SGF.ActiveSet); p.EditBox:SetFocus(); p:Show() end)
+
+    -- Manage both sets
+    local hManage = Header("Manage", f.ImpStrBtn, -14)
+    f.CopyBtn = Button("Copy Set 1 to Set 2", hManage, -6, function() SGF.CopySet1To2() end)
+    f.ShareBtn = Button("Export Active Set", f.CopyBtn, -4, function() local p = SGF.CreateCopyPastePopup(); local s = SGF.SerializeSet(); p.EditBox:SetText(s); p.EditBox:HighlightText(); p.ImportBtn:Hide(); p.Title:SetText("Export Set "..SGF.ActiveSet); p:Show() end)
+    f.ClearBtn = Button("Clear All", f.ShareBtn, -4, function() SGF.ClearLab(nil) end)
+
+    -- Saved sets
+    local hSaved = Header("Saved Sets", f.ClearBtn, -14)
+    f.NameInput = CreateFrame("EditBox", nil, L, "InputBoxTemplate"); f.NameInput:SetSize(BTN_W - 60, 22); f.NameInput:SetPoint("TOPLEFT", hSaved, "BOTTOMLEFT", 5, -6); f.NameInput:SetAutoFocus(false); f.NameInput:SetText("My Set")
+    f.SaveBtn = CreateFrame("Button", nil, L, "UIPanelButtonTemplate"); f.SaveBtn:SetSize(52, 22); f.SaveBtn:SetPoint("LEFT", f.NameInput, "RIGHT", 4, 0); f.SaveBtn:SetText("Save"); f.SaveBtn:SetScript("OnClick", function() SGF.SaveCurrentSet() end)
+
+    f.LoadDD = CreateFrame("Frame", "SGJ_LaboratoryLoadDD", L, "UIDropDownMenuTemplate"); f.LoadDD:SetPoint("TOPLEFT", f.NameInput, "BOTTOMLEFT", -23, -4); UIDropDownMenu_SetWidth(f.LoadDD, BTN_W - 46); UIDropDownMenu_SetText(f.LoadDD, "Load Set...")
+    UIDropDownMenu_Initialize(f.LoadDD, function(self, level) local charDB = SGF.GetCharDB(); if not charDB then return end for name, _ in pairs(charDB) do local info = UIDropDownMenu_CreateInfo(); info.text = name; info.func = function() SGF.LoadSet(name); UIDropDownMenu_SetText(f.LoadDD, name) end; UIDropDownMenu_AddButton(info, level) end end)
+
+    f.DelBtn = CreateFrame("Button", nil, L); f.DelBtn:SetSize(20, 20); f.DelBtn:SetPoint("LEFT", f.LoadDD, "RIGHT", -12, 2); f.DelBtn.Icon = f.DelBtn:CreateTexture(nil, "ARTWORK"); f.DelBtn.Icon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up"); f.DelBtn.Icon:SetAllPoints(); f.DelBtn:SetScript("OnClick", function() SGF.DeleteSelectedSet() end)
+    f.DelBtn:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Delete the selected saved set"); GameTooltip:Show() end)
+    f.DelBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+    -- ==========================================
+    -- CENTRE: SET 1 AND SET 2 SIDE BY SIDE
+    -- ==========================================
+    local col2X = 85
     local dollCoords = {
         HeadSlot = {x=0, y=0}, NeckSlot = {x=0, y=-38}, ShoulderSlot = {x=0, y=-76}, BackSlot = {x=0, y=-114}, ChestSlot = {x=0, y=-152}, WristSlot = {x=0, y=-190},
-        MainHandSlot = {x=0, y=-228}, SecondaryHandSlot = {x=0, y=-266}, RangedSlot = {x=0, y=-304}, 
+        MainHandSlot = {x=0, y=-228}, SecondaryHandSlot = {x=0, y=-266}, RangedSlot = {x=0, y=-304},
         HandsSlot = {x=col2X, y=0}, WaistSlot = {x=col2X, y=-38}, LegsSlot = {x=col2X, y=-76}, FeetSlot = {x=col2X, y=-114}, Finger0Slot = {x=col2X, y=-152}, Finger1Slot = {x=col2X, y=-190}, Trinket0Slot = {x=col2X, y=-228}, Trinket1Slot = {x=col2X, y=-266},
     }
+    local DOLL_W = col2X + 34
+    local centerW = 830 - LAB_LEFT_W - LAB_RIGHT_W
+    local gap = (centerW - 2 * DOLL_W) / 3
+    local dollX = { gap, 2 * gap + DOLL_W }
+    local DOLL_TOP = -56
 
-    f.Set1Btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.Set1Btn:SetSize(70, 22); f.Set1Btn:SetPoint("TOPLEFT", set1Origin.x + 10, -35); f.Set1Btn:SetText("Set 1")
-    f.Set2Btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.Set2Btn:SetSize(70, 22); f.Set2Btn:SetPoint("TOPLEFT", set2Origin.x + 10, -35); f.Set2Btn:SetText("Set 2")
+    -- Each set sits in a panel; the active one is outlined in gold
+    f.SetPanels = {}
+    for setIdx = 1, 2 do
+        local p = CreateFrame("Frame", nil, C)
+        p:SetPoint("TOPLEFT", dollX[setIdx] - 10, -8); p:SetSize(DOLL_W + 20, 450)
+        p.Fill = p:CreateTexture(nil, "BACKGROUND"); p.Fill:SetAllPoints(); p.Fill:SetColorTexture(1, 1, 1, 0.02)
+        p.Edge = {}
+        for i, pts in ipairs({ {"TOPLEFT","TOPRIGHT"}, {"BOTTOMLEFT","BOTTOMRIGHT"}, {"TOPLEFT","BOTTOMLEFT"}, {"TOPRIGHT","BOTTOMRIGHT"} }) do
+            local e = p:CreateTexture(nil, "BORDER"); e:SetColorTexture(1, 0.82, 0, 0.7)
+            e:SetPoint(pts[1]); e:SetPoint(pts[2])
+            if i <= 2 then e:SetHeight(1) else e:SetWidth(1) end
+            p.Edge[i] = e
+        end
+        f.SetPanels[setIdx] = p
+    end
+
+    f.Set1Btn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate"); f.Set1Btn:SetSize(DOLL_W, 22); f.Set1Btn:SetPoint("TOPLEFT", dollX[1], -18); f.Set1Btn:SetText("Set 1")
+    f.Set2Btn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate"); f.Set2Btn:SetSize(DOLL_W, 22); f.Set2Btn:SetPoint("TOPLEFT", dollX[2], -18); f.Set2Btn:SetText("Set 2")
 
     local function UpdateActiveSetUI()
         if SGF.ActiveSet == 1 then f.Set1Btn:LockHighlight(); f.Set2Btn:UnlockHighlight(); f.Set1Btn.Text:SetTextColor(1,1,0); f.Set2Btn.Text:SetTextColor(1,1,1)
         else f.Set1Btn:UnlockHighlight(); f.Set2Btn:LockHighlight(); f.Set1Btn.Text:SetTextColor(1,1,1); f.Set2Btn.Text:SetTextColor(1,1,0) end
+        for idx, p in ipairs(f.SetPanels) do
+            for _, e in ipairs(p.Edge) do e:SetShown(idx == SGF.ActiveSet) end
+        end
     end
     f.Set1Btn:SetScript("OnClick", function() SGF.ActiveSet = 1; UpdateActiveSetUI() end)
     f.Set2Btn:SetScript("OnClick", function() SGF.ActiveSet = 2; UpdateActiveSetUI() end)
     UpdateActiveSetUI()
 
-    f.ActiveLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.ActiveLbl:SetPoint("LEFT", f.Title, "RIGHT", 15, 0); f.ActiveLbl:SetText("(Select Set to Edit)"); f.ActiveLbl:SetTextColor(0.5, 0.5, 0.5)
-
     f.Slots = { [1]={}, [2]={} }
     for setIdx = 1, 2 do
-        local origin = (setIdx == 1) and set1Origin or set2Origin
         for slotName, coords in pairs(dollCoords) do
-            local btn = CreateFrame("Button", nil, f)
-            btn:SetSize(34, 34); btn:SetPoint("TOPLEFT", origin.x + coords.x, origin.y + coords.y)
+            local btn = CreateFrame("Button", nil, C)
+            btn:SetSize(34, 34); btn:SetPoint("TOPLEFT", dollX[setIdx] + coords.x, DOLL_TOP + coords.y)
+            btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn.Icon = btn:CreateTexture(nil, "ARTWORK"); btn.Icon:SetAllPoints(); btn.Icon:SetTexture(SGF.SlotTextures[slotName])
             btn.Border = btn:CreateTexture(nil, "OVERLAY"); btn.Border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border"); btn.Border:SetBlendMode("ADD"); btn.Border:SetAlpha(0.4); btn.Border:SetAllPoints(); btn.Border:Hide()
             btn:SetScript("OnClick", function(self, button)
@@ -877,71 +1012,44 @@ function SGF.InitLaboratoryView(parent)
         end
     end
 
-    f.SpecDD = CreateFrame("Frame", "SGJ_LaboratorySpecDD", f, "UIDropDownMenuTemplate"); f.SpecDD:SetPoint("TOPRIGHT", -10, -5); UIDropDownMenu_SetWidth(f.SpecDD, 120); UIDropDownMenu_SetText(f.SpecDD, "Follow Main Addon")
-    -- In-Game Help Button
-    f.HelpBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.HelpBtn:SetSize(24, 24)
-    f.HelpBtn:SetPoint("TOPRIGHT", f.SpecDD, "TOPLEFT", 10, -3) 
-    f.HelpBtn:SetText("?")
-    f.HelpBtn:SetScript("OnClick", function() SGF.ToggleHelp() end)
-    f.HelpBtn:SetScript("OnEnter", function(self) 
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Help & Instructions")
-        GameTooltip:Show() 
-    end)
-    f.HelpBtn:SetScript("OnLeave", GameTooltip_Hide)
-	UIDropDownMenu_Initialize(f.SpecDD, function(self, level)
-        local info = UIDropDownMenu_CreateInfo(); info.text = "Follow Main Addon"; info.func = function() SGF.SelectedProfile = "Global"; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == "Global" or SGF.SelectedProfile == nil); UIDropDownMenu_AddButton(info, level)
-        if MSC.CurrentClass and MSC.CurrentClass.Weights then for k, v in pairs(MSC.CurrentClass.Weights) do local info = UIDropDownMenu_CreateInfo(); local pretty = (MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[k]) or k; info.text = pretty; info.func = function() SGF.SelectedProfile = k; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == k); UIDropDownMenu_AddButton(info, level) end end
-    end)
+    -- Scores under each set, the difference centred under both
+    local scoreY = DOLL_TOP - 304 - 34 - 18
+    f.ScoreVal1 = C:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal1:SetPoint("TOP", C, "TOPLEFT", dollX[1] + DOLL_W / 2, scoreY); f.ScoreVal1:SetText("0"); f.ScoreVal1:SetTextColor(1,1,0)
+    f.ScoreVal2 = C:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal2:SetPoint("TOP", C, "TOPLEFT", dollX[2] + DOLL_W / 2, scoreY); f.ScoreVal2:SetText("0"); f.ScoreVal2:SetTextColor(1,1,0)
 
-    f.ScoreVal1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal1:SetPoint("TOPLEFT", set1Origin.x + 20, -405); f.ScoreVal1:SetText("0"); f.ScoreVal1:SetTextColor(1,1,0)
-    f.ScoreVal2 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal2:SetPoint("TOPLEFT", set2Origin.x + 20, -405); f.ScoreVal2:SetText("0"); f.ScoreVal2:SetTextColor(1,1,0)
-    
-    f.DiffVal = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); f.DiffVal:SetPoint("TOPLEFT", 140, -430); f.DiffVal:SetText("Ready")
+    f.DiffVal = C:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge"); f.DiffVal:SetPoint("TOP", C, "TOP", 0, scoreY - 64); f.DiffVal:SetText("Ready")
 
-    -- [[ SCROLL FRAME BALANCED ]]
-    local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 375, -45); scroll:SetPoint("BOTTOMRIGHT", -30, 90) 
+    local slotHint = C:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    slotHint:SetPoint("BOTTOM", 0, 12); slotHint:SetText("Right-click or shift-click a slot to empty it"); slotHint:SetTextColor(0.5, 0.5, 0.5)
+
+    -- ==========================================
+    -- RIGHT: STAT COMPARISON
+    -- ==========================================
+    local statHdr = R:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    statHdr:SetPoint("TOPLEFT", 12, -12); statHdr:SetText("Stat Comparison")
+
+    -- Column headings line up with the row columns built in SGF.UpdateStatList
+    local headRow = CreateFrame("Frame", nil, R)
+    headRow:SetPoint("TOPLEFT", statHdr, "BOTTOMLEFT", 0, -8); headRow:SetPoint("RIGHT", R, "RIGHT", -34, 0); headRow:SetHeight(14)
+    local function HeadCell(text, rightOff, width)
+        local t = headRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); t:SetText(text); t:SetTextColor(0.6, 0.6, 0.6)
+        if rightOff then t:SetPoint("RIGHT", headRow, "RIGHT", rightOff, 0); t:SetWidth(width); t:SetJustifyH("RIGHT")
+        else t:SetPoint("LEFT", headRow, "LEFT", 2, 0) end
+    end
+    HeadCell("Stat"); HeadCell("Set 1", SGF.STAT_COL_V1, SGF.STAT_COL_W); HeadCell("Set 2", SGF.STAT_COL_V2, SGF.STAT_COL_W); HeadCell("Diff", SGF.STAT_COL_DIFF, SGF.STAT_COL_W)
+
+    local scroll = CreateFrame("ScrollFrame", nil, R, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", headRow, "BOTTOMLEFT", 0, -4); scroll:SetPoint("BOTTOMRIGHT", -34, 12)
     f.StatScroll = scroll
     f.StatScroll.Content = CreateFrame("Frame", nil, scroll)
-    f.StatScroll.Content:SetSize(230, 600) 
+    f.StatScroll.Content:SetSize(LAB_RIGHT_W - 46, 600)
     scroll:SetScrollChild(f.StatScroll.Content)
+    f.StatEmpty = R:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.StatEmpty:SetPoint("TOPLEFT", scroll, "TOPLEFT", 2, -4); f.StatEmpty:SetWidth(LAB_RIGHT_W - 50); f.StatEmpty:SetJustifyH("LEFT")
+    f.StatEmpty:SetText("Add items to either set to compare their stats."); f.StatEmpty:SetTextColor(0.6, 0.6, 0.6)
+    -- Rows anchor to both edges of the content, so keeping the content as wide as the scroll area keeps every row in step
+    scroll:SetScript("OnSizeChanged", function(self, w) if w and w > 50 then f.StatScroll.Content:SetWidth(w) end end)
 
-    local yR1 = 50
-    f.ImportBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.ImportBtn:SetSize(80, 22); f.ImportBtn:SetPoint("BOTTOMLEFT", 20, yR1); f.ImportBtn:SetText("Equipped"); f.ImportBtn:SetScript("OnClick", function() SGF.ImportEquipped() end)
-    f.CopyBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.CopyBtn:SetSize(80, 22); f.CopyBtn:SetPoint("LEFT", f.ImportBtn, "RIGHT", 5, 0); f.CopyBtn:SetText("Copy 1->2"); f.CopyBtn:SetScript("OnClick", function() SGF.CopySet1To2() end)
-    f.ClearBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.ClearBtn:SetSize(80, 22); f.ClearBtn:SetPoint("LEFT", f.CopyBtn, "RIGHT", 5, 0); f.ClearBtn:SetText("Clear All"); f.ClearBtn:SetScript("OnClick", function() SGF.ClearLab(nil) end)
-    f.NameInput = CreateFrame("EditBox", nil, f, "InputBoxTemplate"); f.NameInput:SetSize(130, 25); f.NameInput:SetPoint("LEFT", f.ClearBtn, "RIGHT", 15, 0); f.NameInput:SetAutoFocus(false); f.NameInput:SetText("My Set")
-    f.SaveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.SaveBtn:SetSize(50, 22); f.SaveBtn:SetPoint("LEFT", f.NameInput, "RIGHT", 5, 0); f.SaveBtn:SetText("Save"); f.SaveBtn:SetScript("OnClick", function() SGF.SaveCurrentSet() end)
-
-    local yR2 = 25
-    f.ShareBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.ShareBtn:SetSize(80, 22); f.ShareBtn:SetPoint("BOTTOMLEFT", 20, yR2); f.ShareBtn:SetText("Export Set"); f.ShareBtn:SetScript("OnClick", function() local p = SGF.CreateCopyPastePopup(); local s = SGF.SerializeSet(); p.EditBox:SetText(s); p.EditBox:HighlightText(); p.ImportBtn:Hide(); p.Title:SetText("Export Set "..SGF.ActiveSet); p:Show() end)
-    
-    f.ImpStrBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.ImpStrBtn:SetSize(80, 22); f.ImpStrBtn:SetPoint("LEFT", f.ShareBtn, "RIGHT", 5, 0); f.ImpStrBtn:SetText("Import Str"); f.ImpStrBtn:SetScript("OnClick", function() local p = SGF.CreateCopyPastePopup(); p.EditBox:SetText(""); p.ImportBtn:Show(); p.Title:SetText("Paste to Set "..SGF.ActiveSet); p.EditBox:SetFocus(); p:Show() end)
-    
-    -- Best in Bag Button (Shift-Click enabled)
-    f.BagBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.BagBtn:SetSize(85, 22); f.BagBtn:SetPoint("LEFT", f.ImpStrBtn, "RIGHT", 5, 0); f.BagBtn:SetText("Best in Bag")
-    f.BagBtn:SetScript("OnClick", function() 
-        local autoEquip = IsShiftKeyDown()
-        SGF.ScanBestInBags(autoEquip) 
-    end)
-    f.BagBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Best in Bag")
-        GameTooltip:AddLine("Scans bags to populate the current Lab Set", 1, 1, 1)
-        GameTooltip:AddLine("with your highest-scoring available gear.", 1, 1, 1)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("<Shift-Click> to also auto-equip the items.", 0, 1, 0)
-        GameTooltip:Show()
-    end)
-    f.BagBtn:SetScript("OnLeave", GameTooltip_Hide)
-	
-    f.LoadDD = CreateFrame("Frame", "SGJ_LaboratoryLoadDD", f, "UIDropDownMenuTemplate"); f.LoadDD:SetPoint("LEFT", f.BagBtn, "RIGHT", -5, -2); UIDropDownMenu_SetWidth(f.LoadDD, 130); UIDropDownMenu_SetText(f.LoadDD, "Load Set...")
-    UIDropDownMenu_Initialize(f.LoadDD, function(self, level) local charDB = SGF.GetCharDB(); if not charDB then return end for name, _ in pairs(charDB) do local info = UIDropDownMenu_CreateInfo(); info.text = name; info.func = function() SGF.LoadSet(name); UIDropDownMenu_SetText(f.LoadDD, name) end; UIDropDownMenu_AddButton(info, level) end end)
-    
-    f.DelBtn = CreateFrame("Button", nil, f); f.DelBtn:SetSize(20, 20); f.DelBtn:SetPoint("LEFT", f.LoadDD, "RIGHT", 5, 3); f.DelBtn.Icon = f.DelBtn:CreateTexture(nil, "ARTWORK"); f.DelBtn.Icon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up"); f.DelBtn.Icon:SetAllPoints(); f.DelBtn:SetScript("OnClick", function() SGF.DeleteSelectedSet() end)
-    
 	MSC.ViewLaboratory = f
 end
 

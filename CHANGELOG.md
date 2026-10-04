@@ -1,3 +1,17 @@
+## 🚀 v3.0.8
+
+### 🖼️ Redesigned for the Bigger Window
+Gear Judge 3.2.0 makes the main window wider, and the Laboratory now uses the room in three columns.
+- **Left**: the scoring profile (with the ? help button), then every action grouped by what it does: **Add to Active Set** (Equipped, Best in Bag, Import String), **Manage** (Copy Set 1 to Set 2, Export Active Set, Clear All) and **Saved Sets** (name and Save, the Load Set list and its delete button). Before, the buttons were packed into two rows along the bottom.
+- **Middle**: Set 1 and Set 2 side by side under their buttons. The set that receives new items is outlined in gold. Each set's score sits under it, with the difference centred below both.
+- **Right**: the stat comparison has columns for Set 1, Set 2 and the difference, with headings, and more room for stat names.
+- While both sets are empty, the stat panel says to add items instead of sitting blank.
+
+### 🐛 Bug Fixes
+- **Stat Rows Follow the Panel Width**: Each row's text widths were fixed when the row was first made, so rows built before the panel had its size kept a 200-pixel fallback. The rows now stretch with the panel.
+- **Right-Click Empties a Slot**: The slot code already emptied a slot on right-click, but the slots only listened for left-clicks. Right-click now works, as does shift-click.
+
+---
 ## 🚀 v3.0.7
 
 ### 🐛 Bug Fixes
