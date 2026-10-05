@@ -586,6 +586,38 @@ function SGF.CreateCopyPastePopup()
 end
 
 -- [[ 4.5 BEST IN BAG SCANNER ]]
+local BIB_FINGER = { "Finger0Slot", "Finger1Slot" }
+local BIB_TRINKET = { "Trinket0Slot", "Trinket1Slot" }
+local BIB_ONEHAND = { "MainHandSlot", "SecondaryHandSlot" }
+local BIB_OFFHAND = { "SecondaryHandSlot" }
+local BIB_MAINHAND = { "MainHandSlot" }
+local BIB_NONE = {}
+-- Partner slots: the same item twice is only blocked when it is unique
+local BIB_PARTNER = {
+    Finger0Slot = "Finger1Slot", Finger1Slot = "Finger0Slot",
+    Trinket0Slot = "Trinket1Slot", Trinket1Slot = "Trinket0Slot",
+    MainHandSlot = "SecondaryHandSlot", SecondaryHandSlot = "MainHandSlot",
+}
+
+-- "Unique" / "Unique-Equipped" read from the item tooltip, cached by item ID
+local uniqueCache = {}
+local function IsUniqueItem(link)
+    local id = link and tonumber(link:match("item:(%d+)"))
+    if not id then return false end
+    if uniqueCache[id] ~= nil then return uniqueCache[id] end
+    local tip = _G["SGF_UniqueScanTooltip"] or CreateFrame("GameTooltip", "SGF_UniqueScanTooltip", nil, "GameTooltipTemplate")
+    tip:SetOwner(WorldFrame, "ANCHOR_NONE"); tip:ClearLines()
+    if not pcall(tip.SetHyperlink, tip, link) then return false end
+    local unique = false
+    local u1, u2 = ITEM_UNIQUE or "Unique", ITEM_UNIQUE_EQUIPPABLE or "Unique-Equipped"
+    for i = 2, math.min(tip:NumLines(), 6) do
+        local text = _G["SGF_UniqueScanTooltipTextLeft" .. i] and _G["SGF_UniqueScanTooltipTextLeft" .. i]:GetText()
+        if text and (text == u1 or text == u2 or string.find(text, u1, 1, true) == 1) then unique = true; break end
+    end
+    if tip:NumLines() > 1 then uniqueCache[id] = unique end
+    return unique
+end
+
 function SGF.ScanBestInBags(autoEquip)
     local MSC = _G.MSC
     if not MSC or not MSC.GetTotalCharacterScore then return end
@@ -620,8 +652,9 @@ function SGF.ScanBestInBags(autoEquip)
             local link = getLink(bag, slot)
             if link then
                 local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(link)
-                if equipLoc and equipLoc ~= "" then
-                    table.insert(bagItems, {link=link, loc=equipLoc})
+                -- Gear the character can't wear would only fail to equip
+                if equipLoc and equipLoc ~= "" and (not MSC.IsItemUsable or MSC.IsItemUsable(link)) then
+                    table.insert(bagItems, {link=link, loc=equipLoc, id=tonumber(link:match("item:(%d+)")), bag=bag, slot=slot})
                 end
             end
         end
@@ -633,10 +666,17 @@ function SGF.ScanBestInBags(autoEquip)
     local maxIterations = 20
     local itemsSwapped = 0
     local itemsToEquip = {}
+    -- One bag item can fill one slot: usedBy[slotName] = the bag item placed there
+    local usedBy = {}
+    local function FreeSlot(sName)
+        if usedBy[sName] then usedBy[sName].used = nil; usedBy[sName] = nil end
+    end
+    -- Scored trial gear; GetTotalCharacterScore keeps no reference to it, so one table is reused
+    local testSimGear = {}
 
     for _ = 1, maxIterations do
         local bestItem, bestSlot = nil, nil
-        local bestDelta = 0.1 
+        local bestDelta = 0.1
 
         local currentSimGear = {}
         
@@ -662,35 +702,30 @@ function SGF.ScanBestInBags(autoEquip)
         local baseScore = MSC:GetTotalCharacterScore(currentSimGear, weights, profileName)
 
         for _, bItem in ipairs(bagItems) do
-            local potentialSlots = {}
+          if not bItem.used then
+            local potentialSlots
             local loc = bItem.loc
-            
-            if loc == "INVTYPE_FINGER" then potentialSlots = {"Finger0Slot", "Finger1Slot"}
-            elseif loc == "INVTYPE_TRINKET" then potentialSlots = {"Trinket0Slot", "Trinket1Slot"}
-            elseif loc == "INVTYPE_WEAPON" then potentialSlots = {"MainHandSlot", "SecondaryHandSlot"}
-            elseif loc == "INVTYPE_SHIELD" or loc == "INVTYPE_HOLDABLE" or loc == "INVTYPE_WEAPONOFFHAND" then potentialSlots = {"SecondaryHandSlot"}
-            elseif loc == "INVTYPE_2HWEAPON" or loc == "INVTYPE_WEAPONMAINHAND" then potentialSlots = {"MainHandSlot"}
+
+            if loc == "INVTYPE_FINGER" then potentialSlots = BIB_FINGER
+            elseif loc == "INVTYPE_TRINKET" then potentialSlots = BIB_TRINKET
+            elseif loc == "INVTYPE_WEAPON" then potentialSlots = BIB_ONEHAND
+            elseif loc == "INVTYPE_SHIELD" or loc == "INVTYPE_HOLDABLE" or loc == "INVTYPE_WEAPONOFFHAND" then potentialSlots = BIB_OFFHAND
+            elseif loc == "INVTYPE_2HWEAPON" or loc == "INVTYPE_WEAPONMAINHAND" then potentialSlots = BIB_MAINHAND
             else
                 local s = SGF.GetSlotFromLoc(loc, currentSimGear)
-                if s then table.insert(potentialSlots, s) end
+                potentialSlots = s and { s } or BIB_NONE
             end
 
             for _, pSlot in ipairs(potentialSlots) do
-                local itemID = tonumber(bItem.link:match("item:(%d+)"))
-                
-                -- Check for Uniqueness using currentSimGear state
-                local partnerSlotNum
-                if pSlot == "Finger0Slot" then partnerSlotNum = slotMap["Finger1Slot"]
-                elseif pSlot == "Finger1Slot" then partnerSlotNum = slotMap["Finger0Slot"]
-                elseif pSlot == "Trinket0Slot" then partnerSlotNum = slotMap["Trinket1Slot"]
-                elseif pSlot == "Trinket1Slot" then partnerSlotNum = slotMap["Trinket0Slot"]
-                end
-                
+                local itemID = bItem.id
+
+                -- A second copy (rings, trinkets, one-handers) is fine unless the item is unique
+                local partnerSlotNum = BIB_PARTNER[pSlot] and slotMap[BIB_PARTNER[pSlot]]
                 local partnerLink = partnerSlotNum and currentSimGear[partnerSlotNum]
                 local partnerID = partnerLink and tonumber(partnerLink:match("item:(%d+)"))
 
-                if not (partnerID and partnerID == itemID) then
-                    local testSimGear = {}
+                if not (partnerID and partnerID == itemID and IsUniqueItem(bItem.link)) then
+                    wipe(testSimGear)
                     for k, v in pairs(currentSimGear) do testSimGear[k] = v end
                     testSimGear[slotMap[pSlot]] = bItem.link
 
@@ -714,11 +749,21 @@ function SGF.ScanBestInBags(autoEquip)
                     end
                 end
             end
+          end
         end
 
         if bestItem and bestSlot then
             itemsSwapped = itemsSwapped + 1
             itemsToEquip[bestSlot] = bestItem.link
+            FreeSlot(bestSlot)
+            usedBy[bestSlot] = bestItem
+            bestItem.used = true
+            -- A two-hander empties the off hand; an off-hand item empties a two-handed main hand
+            if bestSlot == "MainHandSlot" and bestItem.loc == "INVTYPE_2HWEAPON" then
+                FreeSlot("SecondaryHandSlot")
+            elseif bestSlot == "SecondaryHandSlot" and usedBy["MainHandSlot"] and usedBy["MainHandSlot"].loc == "INVTYPE_2HWEAPON" then
+                FreeSlot("MainHandSlot")
+            end
             
             -- If NOT auto-equipping, apply directly to Lab UI during loop
             if not autoEquip then
@@ -762,9 +807,19 @@ function SGF.ScanBestInBags(autoEquip)
                 print(L["|cffff0000SGJ:|r Cannot equip items while in combat."])
             else
                 print(string.format(L["|cff00ff00SGJ:|r Equipping %d upgrades from bags..."], itemsSwapped))
+                -- Equip from the exact bag slot: by name, two copies of one weapon
+                -- could both resolve to the same bag item
+                local pickup = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
                 for slotName, link in pairs(itemsToEquip) do
                     local slotID = GetInventorySlotInfo(slotName)
-                    EquipItemByName(link, slotID)
+                    local src = usedBy[slotName]
+                    if src and src.bag and pickup and EquipCursorItem then
+                        ClearCursor()
+                        pickup(src.bag, src.slot)
+                        EquipCursorItem(slotID)
+                    else
+                        EquipItemByName(link, slotID)
+                    end
                 end
                 
                 C_Timer.After(0.5, function()

@@ -3,6 +3,13 @@
 ### 🌍 Translations
 - **Translated**: The Laboratory is now translated into every language WoW Forever launches with: German, Spanish (Spain and Latin America), French, Brazilian Portuguese, Russian, Korean and Traditional Chinese.
 
+### ⚡ Best in Bag
+- **Faster**: Best in Bag reuses its working tables and works out each bag item's possible slots once per pass, instead of creating new tables for every item it tries.
+- **Fixed: One Item in Two Slots**: A single one-handed weapon in your bags could be placed in both the main hand and the off hand (and Shift-Click then tried to equip it twice). Each bag item now fills one slot at most; it becomes free again if a better item replaces it. Two copies of a weapon still fill both hands.
+- **Fixed: Two Copies Only When Unique**: Two copies of the same ring or trinket were never suggested together, even though the game allows it, while two copies of a unique one-hander were. Now a second copy of any ring, trinket or one-hander is suggested unless the item is Unique or Unique-Equipped.
+- **Fixed: Shift-Click With Two Copies**: Shift-Click equipped by item name, so two copies of one weapon could both point at the same bag item. It now equips each item from its own bag slot.
+- **Fixed: Gear You Can't Wear**: Best in Bag could suggest bag items your character can't use (wrong armor type, weapon type or class), which then failed to equip. They're now skipped.
+
 -------------------------------------------------------------------------
 
 ## 🚀 v3.0.8
