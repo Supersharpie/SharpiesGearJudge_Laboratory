@@ -1,4 +1,5 @@
 local addonName, SGF = ... 
+local L = (_G.MSC and _G.MSC.L) or setmetatable({}, { __index = function(t, k) return k end })
 SGF.LabItems = { [1]={}, [2]={} }
 SGF.ActiveSet = 1 -- Which set is currently receiving inputs?
 SGF.StatRows = {} 
@@ -95,7 +96,7 @@ function SGF.ReceiveLink(link)
             if SGF.LabItems[setIdx]["SecondaryHandSlot"] then
                 SGF.LabItems[setIdx]["SecondaryHandSlot"] = nil
                 SGF.UpdateLabSlot("SecondaryHandSlot", setIdx)
-                print("|cffff0000SGJ (Set "..setIdx.."):|r Removed Off-Hand (2H Weapon equipped).")
+                print(string.format(L["|cffff0000SGJ (Set %d):|r Removed Off-Hand (2H Weapon equipped)."], setIdx))
             end
         elseif targetSlot == "SecondaryHandSlot" then
             local mhLink = SGF.LabItems[setIdx]["MainHandSlot"]
@@ -104,7 +105,7 @@ function SGF.ReceiveLink(link)
                 if mhLoc == "INVTYPE_2HWEAPON" then
                     SGF.LabItems[setIdx]["MainHandSlot"] = nil
                     SGF.UpdateLabSlot("MainHandSlot", setIdx)
-                    print("|cffff0000SGJ (Set "..setIdx.."):|r Removed Main-Hand (Cannot hold 2H with Shield).")
+                    print(string.format(L["|cffff0000SGJ (Set %d):|r Removed Main-Hand (Cannot hold 2H with Shield)."], setIdx))
                 end
             end
         end
@@ -112,7 +113,7 @@ function SGF.ReceiveLink(link)
         SGF.CalculateLabScore()
         PlaySound(1115) 
     else
-        print("|cffff0000SGJ:|r Cannot slot item type: " .. (equipLoc or "Unknown"))
+        print(string.format(L["|cffff0000SGJ:|r Cannot slot item type: %s"], equipLoc or L["Unknown"]))
     end
 end
 
@@ -147,7 +148,7 @@ function SGF.ImportEquipped()
         SGF.UpdateLabSlot(slotName, setIdx)
     end
     SGF.CalculateLabScore()
-    print("|cff00ff00SGJ:|r Equipped gear imported into Set " .. setIdx)
+    print(string.format(L["|cff00ff00SGJ:|r Equipped gear imported into Set %d"], setIdx))
 end
 
 function SGF.CopySet1To2()
@@ -161,7 +162,7 @@ function SGF.CopySet1To2()
         SGF.UpdateLabSlot(slotName, 2)
     end
     SGF.CalculateLabScore()
-    print("|cff00ff00SGJ:|r Copied Set 1 to Set 2.")
+    print(L["|cff00ff00SGJ:|r Copied Set 1 to Set 2."])
 end
 
 function SGF.ClearLab(setIdx)
@@ -181,7 +182,7 @@ function SGF.ClearLab(setIdx)
     local MSC = _G.MSC
     if MSC and MSC.ViewLaboratory then
         MSC.ViewLaboratory.NameInput:SetText("")
-        UIDropDownMenu_SetText(MSC.ViewLaboratory.LoadDD, "Load Set...")
+        UIDropDownMenu_SetText(MSC.ViewLaboratory.LoadDD, L["Load Set..."])
     end
 end
 
@@ -230,11 +231,11 @@ function SGF.CalculateLabScore()
     
     local diff = s2 - s1
     if diff > 0.1 then
-        MSC.ViewLaboratory.DiffVal:SetText(string.format("Set 2 is |cff00ff00+%.1f|r better", diff))
+        MSC.ViewLaboratory.DiffVal:SetText(string.format(L["Set 2 is |cff00ff00+%.1f|r better"], diff))
     elseif diff < -0.1 then
-        MSC.ViewLaboratory.DiffVal:SetText(string.format("Set 1 is |cff00ff00+%.1f|r better", math.abs(diff)))
+        MSC.ViewLaboratory.DiffVal:SetText(string.format(L["Set 1 is |cff00ff00+%.1f|r better"], math.abs(diff)))
     else
-        MSC.ViewLaboratory.DiffVal:SetText("|cff888888Sets are Equal|r")
+        MSC.ViewLaboratory.DiffVal:SetText(L["|cff888888Sets are Equal|r"])
     end
 
     SGF.UpdateStatList(stats1, stats2, weights)
@@ -351,7 +352,7 @@ function SGF.SaveCurrentSet()
     local setIdx = SGF.ActiveSet
     
     if not name or name == "" then 
-        print("|cffff0000SGJ:|r Please enter a name for Set "..setIdx)
+        print(string.format(L["|cffff0000SGJ:|r Please enter a name for Set %d"], setIdx))
         return 
     end
     
@@ -359,7 +360,7 @@ function SGF.SaveCurrentSet()
     charDB[name] = {}
     for k, v in pairs(SGF.LabItems[setIdx]) do charDB[name][k] = v end
     
-    print("|cff00ff00SGJ:|r Saved Active Set ("..setIdx..") as '"..name.."'")
+    print(string.format(L["|cff00ff00SGJ:|r Saved Active Set (%d) as '%s'"], setIdx, name))
     MSC.ViewLaboratory.NameInput:ClearFocus()
     UIDropDownMenu_SetText(MSC.ViewLaboratory.LoadDD, name)
 end
@@ -376,7 +377,7 @@ function SGF.LoadSet(name)
     for _, s in ipairs(SGF.OrderedSlots) do SGF.UpdateLabSlot(s, setIdx) end
     SGF.CalculateLabScore()
     MSC.ViewLaboratory.NameInput:SetText(name)
-    print("|cff00ccffSGJ:|r Loaded '"..name.."' into Set "..setIdx)
+    print(string.format(L["|cff00ccffSGJ:|r Loaded '%s' into Set %d"], name, setIdx))
 end
 
 function SGF.DeleteSelectedSet()
@@ -385,10 +386,10 @@ function SGF.DeleteSelectedSet()
     local charDB = SGF.GetCharDB()
     if name and charDB and charDB[name] then
         charDB[name] = nil
-        print("|cffff0000SGJ:|r Deleted set '"..name.."'.")
+        print(string.format(L["|cffff0000SGJ:|r Deleted set '%s'."], name))
         SGF.ClearLab(nil)
     else
-        print("|cffff0000SGJ:|r Select a set to delete first.")
+        print(L["|cffff0000SGJ:|r Select a set to delete first."])
     end
 end
 
@@ -422,13 +423,13 @@ function SGF.DeserializeSet(importStr)
             end
         end
         SGF.CalculateLabScore()
-        print("|cff00ff00SGJ:|r Native Set Imported into Set "..setIdx)
+        print(string.format(L["|cff00ff00SGJ:|r Native Set Imported into Set %d"], setIdx))
         return
     end
 
     -- [[ MODE 2: JSON (SeventyUpgrades) ]]
     if importStr:find("\"items\":") or importStr:find("\"gameClass\":") then
-        print("|cff00ccffSGJ:|r JSON detected. Parsing structure...")
+        print(L["|cff00ccffSGJ:|r JSON detected. Parsing structure..."])
         local jsonMap = {
             ["HEAD"] = "HeadSlot", ["NECK"] = "NeckSlot", ["SHOULDERS"] = "ShoulderSlot", 
             ["BACK"] = "BackSlot", ["CHEST"] = "ChestSlot", ["WRISTS"] = "WristSlot", 
@@ -457,14 +458,14 @@ function SGF.DeserializeSet(importStr)
             end
         end
         SGF.CalculateLabScore()
-        print("|cff00ff00SGJ:|r JSON Import Complete.")
+        print(L["|cff00ff00SGJ:|r JSON Import Complete."])
         return
     end
 
     -- [[ MODE 3: SIMC / RAIDBOTS ]]
     -- Format: "head=item_name,id=1234,enchant_id=56"
     if importStr:find("id=") then
-        print("|cff00ccffSGJ:|r SimC format detected...")
+        print(L["|cff00ccffSGJ:|r SimC format detected..."])
         -- Map SimC slot names to ours
         local simcMap = {
             ["head"] = "HeadSlot", ["neck"] = "NeckSlot", ["shoulders"] = "ShoulderSlot", 
@@ -490,12 +491,12 @@ function SGF.DeserializeSet(importStr)
             end
         end
         SGF.CalculateLabScore()
-        print("|cff00ff00SGJ:|r SimC Import Complete.")
+        print(L["|cff00ff00SGJ:|r SimC Import Complete."])
         return
     end
 
     -- [[ MODE 4: GENERIC SCRAPER (Wowhead "Links" / Text Lists) ]]
-    print("|cff00ccffSGJ:|r Parsing generic item list...")
+    print(L["|cff00ccffSGJ:|r Parsing generic item list..."])
     for id in importStr:gmatch("%d+") do
         local itemID = tonumber(id)
         if itemID and itemID > 2000 then 
@@ -512,7 +513,7 @@ function SGF.DeserializeSet(importStr)
         end
     end
     SGF.CalculateLabScore()
-    print("|cff00ff00SGJ:|r List Parsed.")
+    print(L["|cff00ff00SGJ:|r List Parsed."])
 end
 
 function SGF.CreateCopyPastePopup()
@@ -535,7 +536,7 @@ function SGF.CreateCopyPastePopup()
 
     f.Title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.Title:SetPoint("TOP", 0, -20) -- Adjusted slightly down for the new border
-    f.Title:SetText("Export / Import")
+    f.Title:SetText(L["Export / Import"])
     
     local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -5, -5)
@@ -566,7 +567,7 @@ function SGF.CreateCopyPastePopup()
     local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     btn:SetSize(100, 25)
     btn:SetPoint("BOTTOM", 0, 20)
-    btn:SetText("Import This")
+    btn:SetText(L["Import This"])
     btn:SetScript("OnClick", function() 
         local text = eb:GetText()
         SGF.DeserializeSet(text)
@@ -576,7 +577,7 @@ function SGF.CreateCopyPastePopup()
     
     f.Hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.Hint:SetPoint("BOTTOM", 0, 50)
-    f.Hint:SetText("Press Ctrl+C to Copy or Ctrl+V to Paste")
+    f.Hint:SetText(L["Press Ctrl+C to Copy or Ctrl+V to Paste"])
     f.Hint:SetTextColor(0.6, 0.6, 0.6)
     
     f:Hide()
@@ -602,7 +603,7 @@ function SGF.ScanBestInBags(autoEquip)
         weights, profileName = MSC.GetCurrentWeights()
     end
 
-    if not weights then print("|cffff0000SGJ:|r No active stat weights found."); return end
+    if not weights then print(L["|cffff0000SGJ:|r No active stat weights found."]); return end
 
     local slotMap = { 
         HeadSlot=1, NeckSlot=2, ShoulderSlot=3, BackSlot=15, ChestSlot=5, 
@@ -626,8 +627,8 @@ function SGF.ScanBestInBags(autoEquip)
         end
     end
 
-    if #bagItems == 0 then print("|cff00ccffSGJ:|r No gear found in bags."); return end
-    print("|cff00ccffSGJ:|r Scanning bags for upgrades...")
+    if #bagItems == 0 then print(L["|cff00ccffSGJ:|r No gear found in bags."]); return end
+    print(L["|cff00ccffSGJ:|r Scanning bags for upgrades..."])
 
     local maxIterations = 20
     local itemsSwapped = 0
@@ -758,9 +759,9 @@ function SGF.ScanBestInBags(autoEquip)
     if itemsSwapped > 0 then
         if autoEquip then
             if InCombatLockdown() then
-                print("|cffff0000SGJ:|r Cannot equip items while in combat.")
+                print(L["|cffff0000SGJ:|r Cannot equip items while in combat."])
             else
-                print("|cff00ff00SGJ:|r Equipping " .. itemsSwapped .. " upgrades from bags...")
+                print(string.format(L["|cff00ff00SGJ:|r Equipping %d upgrades from bags..."], itemsSwapped))
                 for slotName, link in pairs(itemsToEquip) do
                     local slotID = GetInventorySlotInfo(slotName)
                     EquipItemByName(link, slotID)
@@ -768,15 +769,15 @@ function SGF.ScanBestInBags(autoEquip)
                 
                 C_Timer.After(0.5, function()
                     SGF.ImportEquipped()
-                    print("|cff00ff00SGJ:|r Active Lab Set updated to match your newly equipped gear.")
+                    print(L["|cff00ff00SGJ:|r Active Lab Set updated to match your newly equipped gear."])
                 end)
             end
         else
-            print("|cff00ff00SGJ:|r Best in Bag applied! Found " .. itemsSwapped .. " upgrades for Set " .. setIdx .. ".")
+            print(string.format(L["|cff00ff00SGJ:|r Best in Bag applied! Found %d upgrades for Set %d."], itemsSwapped, setIdx))
             SGF.CalculateLabScore()
         end
     else
-        print("|cff00ccffSGJ:|r No upgrades found in bags.")
+        print(L["|cff00ccffSGJ:|r No upgrades found in bags."])
     end
 end
 
@@ -799,7 +800,7 @@ function SGF.ToggleHelp()
         
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -20)
-        title:SetText("The Laboratory - How to Use")
+        title:SetText(L["The Laboratory - How to Use"])
         
         local text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         text:SetPoint("TOPLEFT", 25, -55)
@@ -808,23 +809,23 @@ function SGF.ToggleHelp()
         text:SetJustifyV("TOP")
         
         local instructions = 
-            "|cff00ccffThe Laboratory|r allows you to build and compare two full gear sets side-by-side to see exactly how stat changes affect your score.\n\n" ..
-            "|cffffff00Adding Items to a Set:|r\n" ..
-            "  • |cff00ff00Shift-Click|r: Click any item in your bags, chat, or AtlasLoot to add it to the active set.\n" ..
-            "  • |cff00ff00Equipped|r: Pulls all gear currently worn by your character into the active set.\n" ..
-            "  • |cff00ff00Best in Bag|r: Scans your bags to build the highest-scoring set possible. |cffaaaaaa(Shift-Click this to physically evaluate and equip your character's best gear!)|r\n" ..
-			"  • |cff00ff00Import Str|r: Paste data directly from SeventyUpgrades (JSON) or SimC/Raidbots.\n\n" ..
-            "|cffffff00Comparing Sets:|r\n" ..
-            "Toggle between |cff00ff00Set 1|r and |cff00ff00Set 2|r using the buttons above the paper dolls. The scrollable stat panel on the right will display a color-coded breakdown of the stat differences between the two sets.\n\n" ..
-            "|cffffff00Saving & Loading:|r\n" ..
-            "Type a name into the text box and click |cff00ff00Save|r to store your theorycrafted set locally. Use the dropdown to load it later."
+            L["|cff00ccffThe Laboratory|r allows you to build and compare two full gear sets side-by-side to see exactly how stat changes affect your score."] .. "\n\n" ..
+            L["|cffffff00Adding Items to a Set:|r"] .. "\n" ..
+            L["  • |cff00ff00Shift-Click|r: Click any item in your bags, chat, or AtlasLoot to add it to the active set."] .. "\n" ..
+            L["  • |cff00ff00Equipped|r: Pulls all gear currently worn by your character into the active set."] .. "\n" ..
+            L["  • |cff00ff00Best in Bag|r: Scans your bags to build the highest-scoring set possible. |cffaaaaaa(Shift-Click this to physically evaluate and equip your character's best gear!)|r"] .. "\n" ..
+			L["  • |cff00ff00Import Str|r: Paste data directly from SeventyUpgrades (JSON) or SimC/Raidbots."] .. "\n\n" ..
+            L["|cffffff00Comparing Sets:|r"] .. "\n" ..
+            L["Toggle between |cff00ff00Set 1|r and |cff00ff00Set 2|r using the buttons above the paper dolls. The scrollable stat panel on the right will display a color-coded breakdown of the stat differences between the two sets."] .. "\n\n" ..
+            L["|cffffff00Saving & Loading:|r"] .. "\n" ..
+            L["Type a name into the text box and click |cff00ff00Save|r to store your theorycrafted set locally. Use the dropdown to load it later."]
             
         text:SetText(instructions)
         
         local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         closeBtn:SetSize(100, 25)
         closeBtn:SetPoint("BOTTOM", 0, 20)
-        closeBtn:SetText("Got it!")
+        closeBtn:SetText(L["Got it!"])
         closeBtn:SetScript("OnClick", function() f:Hide() end)
         
         SGF.HelpFrame = f
@@ -848,30 +849,30 @@ function SGF.InitLaboratoryView(parent)
     -- ==========================================
     -- COLUMNS
     -- ==========================================
-    local L = CreateFrame("Frame", nil, f)
-    L:SetPoint("TOPLEFT"); L:SetPoint("BOTTOMLEFT"); L:SetWidth(LAB_LEFT_W)
+    local LCol = CreateFrame("Frame", nil, f)
+    LCol:SetPoint("TOPLEFT"); LCol:SetPoint("BOTTOMLEFT"); LCol:SetWidth(LAB_LEFT_W)
     local R = CreateFrame("Frame", nil, f)
     R:SetPoint("TOPRIGHT"); R:SetPoint("BOTTOMRIGHT"); R:SetWidth(LAB_RIGHT_W)
     local C = CreateFrame("Frame", nil, f)
-    C:SetPoint("TOPLEFT", L, "TOPRIGHT"); C:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT")
-    for _, col in ipairs({ L, R }) do
+    C:SetPoint("TOPLEFT", LCol, "TOPRIGHT"); C:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT")
+    for _, col in ipairs({ LCol, R }) do
         local shade = col:CreateTexture(nil, "BACKGROUND"); shade:SetAllPoints(); shade:SetColorTexture(0, 0, 0, 0.25)
     end
     local function Divider(col, side)
         local t = col:CreateTexture(nil, "BORDER"); t:SetColorTexture(1, 1, 1, 0.08); t:SetWidth(1)
         t:SetPoint("TOP" .. side, 0, 0); t:SetPoint("BOTTOM" .. side, 0, 0)
     end
-    Divider(L, "RIGHT"); Divider(R, "LEFT")
+    Divider(LCol, "RIGHT"); Divider(R, "LEFT")
 
     local BTN_W = LAB_LEFT_W - 24
     local function Header(text, anchor, yOff)
-        local h = L:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local h = LCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         if anchor then h:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff) else h:SetPoint("TOPLEFT", 12, -12) end
         h:SetText(text)
         return h
     end
     local function Button(text, anchor, yOff, onClick)
-        local b = CreateFrame("Button", nil, L, "UIPanelButtonTemplate")
+        local b = CreateFrame("Button", nil, LCol, "UIPanelButtonTemplate")
         b:SetSize(BTN_W, 22); b:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff); b:SetText(text)
         if onClick then b:SetScript("OnClick", onClick) end
         return b
@@ -880,72 +881,72 @@ function SGF.InitLaboratoryView(parent)
     -- ==========================================
     -- LEFT: TITLE, PROFILE, ACTIONS, SAVED SETS
     -- ==========================================
-    f.Title = Header("The Laboratory")
+    f.Title = Header(L["The Laboratory"])
 
     -- In-Game Help Button
-    f.HelpBtn = CreateFrame("Button", nil, L, "UIPanelButtonTemplate")
+    f.HelpBtn = CreateFrame("Button", nil, LCol, "UIPanelButtonTemplate")
     f.HelpBtn:SetSize(22, 22)
     f.HelpBtn:SetPoint("TOPRIGHT", -12, -8)
     f.HelpBtn:SetText("?")
     f.HelpBtn:SetScript("OnClick", function() SGF.ToggleHelp() end)
     f.HelpBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Help & Instructions")
+        GameTooltip:SetText(L["Help & Instructions"])
         GameTooltip:Show()
     end)
     f.HelpBtn:SetScript("OnLeave", GameTooltip_Hide)
 
-    local profLbl = L:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profLbl:SetPoint("TOPLEFT", f.Title, "BOTTOMLEFT", 0, -12); profLbl:SetText("Scoring Profile"); profLbl:SetTextColor(0.6, 0.6, 0.6)
-    f.SpecDD = CreateFrame("Frame", "SGJ_LaboratorySpecDD", L, "UIDropDownMenuTemplate"); f.SpecDD:SetPoint("TOPLEFT", profLbl, "BOTTOMLEFT", -18, -2)
-    UIDropDownMenu_SetWidth(f.SpecDD, BTN_W - 16); UIDropDownMenu_SetText(f.SpecDD, "Follow Main Addon")
+    local profLbl = LCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    profLbl:SetPoint("TOPLEFT", f.Title, "BOTTOMLEFT", 0, -12); profLbl:SetText(L["Scoring Profile"]); profLbl:SetTextColor(0.6, 0.6, 0.6)
+    f.SpecDD = CreateFrame("Frame", "SGJ_LaboratorySpecDD", LCol, "UIDropDownMenuTemplate"); f.SpecDD:SetPoint("TOPLEFT", profLbl, "BOTTOMLEFT", -18, -2)
+    UIDropDownMenu_SetWidth(f.SpecDD, BTN_W - 16); UIDropDownMenu_SetText(f.SpecDD, L["Follow Main Addon"])
 	UIDropDownMenu_Initialize(f.SpecDD, function(self, level)
-        local info = UIDropDownMenu_CreateInfo(); info.text = "Follow Main Addon"; info.func = function() SGF.SelectedProfile = "Global"; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == "Global" or SGF.SelectedProfile == nil); UIDropDownMenu_AddButton(info, level)
+        local info = UIDropDownMenu_CreateInfo(); info.text = L["Follow Main Addon"]; info.func = function() SGF.SelectedProfile = "Global"; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == "Global" or SGF.SelectedProfile == nil); UIDropDownMenu_AddButton(info, level)
         if MSC.CurrentClass and MSC.CurrentClass.Weights then for k, v in pairs(MSC.CurrentClass.Weights) do local info = UIDropDownMenu_CreateInfo(); local pretty = (MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[k]) or k; info.text = pretty; info.func = function() SGF.SelectedProfile = k; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == k); UIDropDownMenu_AddButton(info, level) end end
     end)
 
     -- Add items to the active set
-    local hAdd = Header("Add to Active Set", profLbl, -46)
-    f.ActiveLbl = L:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.ActiveLbl:SetPoint("TOPLEFT", hAdd, "BOTTOMLEFT", 0, -3)
+    local hAdd = Header(L["Add to Active Set"], profLbl, -46)
+    f.ActiveLbl = LCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.ActiveLbl:SetPoint("TOPLEFT", hAdd, "BOTTOMLEFT", 0, -3)
     f.ActiveLbl:SetWidth(BTN_W); f.ActiveLbl:SetJustifyH("LEFT"); f.ActiveLbl:SetTextColor(0.6, 0.6, 0.6)
-    f.ActiveLbl:SetText("Shift-click items in your bags or chat. Pick the set with its button above the gear.")
-    f.ImportBtn = Button("Equipped", f.ActiveLbl, -8, function() SGF.ImportEquipped() end)
+    f.ActiveLbl:SetText(L["Shift-click items in your bags or chat. Pick the set with its button above the gear."])
+    f.ImportBtn = Button(L["Equipped"], f.ActiveLbl, -8, function() SGF.ImportEquipped() end)
 
     -- Best in Bag Button (Shift-Click enabled)
-    f.BagBtn = Button("Best in Bag", f.ImportBtn, -4)
+    f.BagBtn = Button(L["Best in Bag"], f.ImportBtn, -4)
     f.BagBtn:SetScript("OnClick", function()
         local autoEquip = IsShiftKeyDown()
         SGF.ScanBestInBags(autoEquip)
     end)
     f.BagBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Best in Bag")
-        GameTooltip:AddLine("Scans bags to populate the current Lab Set", 1, 1, 1)
-        GameTooltip:AddLine("with your highest-scoring available gear.", 1, 1, 1)
+        GameTooltip:SetText(L["Best in Bag"])
+        GameTooltip:AddLine(L["Scans bags to populate the current Lab Set"], 1, 1, 1)
+        GameTooltip:AddLine(L["with your highest-scoring available gear."], 1, 1, 1)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("<Shift-Click> to also auto-equip the items.", 0, 1, 0)
+        GameTooltip:AddLine(L["<Shift-Click> to also auto-equip the items."], 0, 1, 0)
         GameTooltip:Show()
     end)
     f.BagBtn:SetScript("OnLeave", GameTooltip_Hide)
 
-    f.ImpStrBtn = Button("Import String", f.BagBtn, -4, function() local p = SGF.CreateCopyPastePopup(); p.EditBox:SetText(""); p.ImportBtn:Show(); p.Title:SetText("Paste to Set "..SGF.ActiveSet); p.EditBox:SetFocus(); p:Show() end)
+    f.ImpStrBtn = Button(L["Import String"], f.BagBtn, -4, function() local p = SGF.CreateCopyPastePopup(); p.EditBox:SetText(""); p.ImportBtn:Show(); p.Title:SetText(string.format(L["Paste to Set %d"], SGF.ActiveSet)); p.EditBox:SetFocus(); p:Show() end)
 
     -- Manage both sets
-    local hManage = Header("Manage", f.ImpStrBtn, -14)
-    f.CopyBtn = Button("Copy Set 1 to Set 2", hManage, -6, function() SGF.CopySet1To2() end)
-    f.ShareBtn = Button("Export Active Set", f.CopyBtn, -4, function() local p = SGF.CreateCopyPastePopup(); local s = SGF.SerializeSet(); p.EditBox:SetText(s); p.EditBox:HighlightText(); p.ImportBtn:Hide(); p.Title:SetText("Export Set "..SGF.ActiveSet); p:Show() end)
-    f.ClearBtn = Button("Clear All", f.ShareBtn, -4, function() SGF.ClearLab(nil) end)
+    local hManage = Header(L["Manage"], f.ImpStrBtn, -14)
+    f.CopyBtn = Button(L["Copy Set 1 to Set 2"], hManage, -6, function() SGF.CopySet1To2() end)
+    f.ShareBtn = Button(L["Export Active Set"], f.CopyBtn, -4, function() local p = SGF.CreateCopyPastePopup(); local s = SGF.SerializeSet(); p.EditBox:SetText(s); p.EditBox:HighlightText(); p.ImportBtn:Hide(); p.Title:SetText(string.format(L["Export Set %d"], SGF.ActiveSet)); p:Show() end)
+    f.ClearBtn = Button(L["Clear All"], f.ShareBtn, -4, function() SGF.ClearLab(nil) end)
 
     -- Saved sets
-    local hSaved = Header("Saved Sets", f.ClearBtn, -14)
-    f.NameInput = CreateFrame("EditBox", nil, L, "InputBoxTemplate"); f.NameInput:SetSize(BTN_W - 60, 22); f.NameInput:SetPoint("TOPLEFT", hSaved, "BOTTOMLEFT", 5, -6); f.NameInput:SetAutoFocus(false); f.NameInput:SetText("My Set")
-    f.SaveBtn = CreateFrame("Button", nil, L, "UIPanelButtonTemplate"); f.SaveBtn:SetSize(52, 22); f.SaveBtn:SetPoint("LEFT", f.NameInput, "RIGHT", 4, 0); f.SaveBtn:SetText("Save"); f.SaveBtn:SetScript("OnClick", function() SGF.SaveCurrentSet() end)
+    local hSaved = Header(L["Saved Sets"], f.ClearBtn, -14)
+    f.NameInput = CreateFrame("EditBox", nil, LCol, "InputBoxTemplate"); f.NameInput:SetSize(BTN_W - 60, 22); f.NameInput:SetPoint("TOPLEFT", hSaved, "BOTTOMLEFT", 5, -6); f.NameInput:SetAutoFocus(false); f.NameInput:SetText(L["My Set"])
+    f.SaveBtn = CreateFrame("Button", nil, LCol, "UIPanelButtonTemplate"); f.SaveBtn:SetSize(52, 22); f.SaveBtn:SetPoint("LEFT", f.NameInput, "RIGHT", 4, 0); f.SaveBtn:SetText(L["Save"]); f.SaveBtn:SetScript("OnClick", function() SGF.SaveCurrentSet() end)
 
-    f.LoadDD = CreateFrame("Frame", "SGJ_LaboratoryLoadDD", L, "UIDropDownMenuTemplate"); f.LoadDD:SetPoint("TOPLEFT", f.NameInput, "BOTTOMLEFT", -23, -4); UIDropDownMenu_SetWidth(f.LoadDD, BTN_W - 46); UIDropDownMenu_SetText(f.LoadDD, "Load Set...")
+    f.LoadDD = CreateFrame("Frame", "SGJ_LaboratoryLoadDD", LCol, "UIDropDownMenuTemplate"); f.LoadDD:SetPoint("TOPLEFT", f.NameInput, "BOTTOMLEFT", -23, -4); UIDropDownMenu_SetWidth(f.LoadDD, BTN_W - 46); UIDropDownMenu_SetText(f.LoadDD, L["Load Set..."])
     UIDropDownMenu_Initialize(f.LoadDD, function(self, level) local charDB = SGF.GetCharDB(); if not charDB then return end for name, _ in pairs(charDB) do local info = UIDropDownMenu_CreateInfo(); info.text = name; info.func = function() SGF.LoadSet(name); UIDropDownMenu_SetText(f.LoadDD, name) end; UIDropDownMenu_AddButton(info, level) end end)
 
-    f.DelBtn = CreateFrame("Button", nil, L); f.DelBtn:SetSize(20, 20); f.DelBtn:SetPoint("LEFT", f.LoadDD, "RIGHT", -12, 2); f.DelBtn.Icon = f.DelBtn:CreateTexture(nil, "ARTWORK"); f.DelBtn.Icon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up"); f.DelBtn.Icon:SetAllPoints(); f.DelBtn:SetScript("OnClick", function() SGF.DeleteSelectedSet() end)
-    f.DelBtn:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Delete the selected saved set"); GameTooltip:Show() end)
+    f.DelBtn = CreateFrame("Button", nil, LCol); f.DelBtn:SetSize(20, 20); f.DelBtn:SetPoint("LEFT", f.LoadDD, "RIGHT", -12, 2); f.DelBtn.Icon = f.DelBtn:CreateTexture(nil, "ARTWORK"); f.DelBtn.Icon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up"); f.DelBtn.Icon:SetAllPoints(); f.DelBtn:SetScript("OnClick", function() SGF.DeleteSelectedSet() end)
+    f.DelBtn:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText(L["Delete the selected saved set"]); GameTooltip:Show() end)
     f.DelBtn:SetScript("OnLeave", GameTooltip_Hide)
 
     -- ==========================================
@@ -979,8 +980,8 @@ function SGF.InitLaboratoryView(parent)
         f.SetPanels[setIdx] = p
     end
 
-    f.Set1Btn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate"); f.Set1Btn:SetSize(DOLL_W, 22); f.Set1Btn:SetPoint("TOPLEFT", dollX[1], -18); f.Set1Btn:SetText("Set 1")
-    f.Set2Btn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate"); f.Set2Btn:SetSize(DOLL_W, 22); f.Set2Btn:SetPoint("TOPLEFT", dollX[2], -18); f.Set2Btn:SetText("Set 2")
+    f.Set1Btn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate"); f.Set1Btn:SetSize(DOLL_W, 22); f.Set1Btn:SetPoint("TOPLEFT", dollX[1], -18); f.Set1Btn:SetText(L["Set 1"])
+    f.Set2Btn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate"); f.Set2Btn:SetSize(DOLL_W, 22); f.Set2Btn:SetPoint("TOPLEFT", dollX[2], -18); f.Set2Btn:SetText(L["Set 2"])
 
     local function UpdateActiveSetUI()
         if SGF.ActiveSet == 1 then f.Set1Btn:LockHighlight(); f.Set2Btn:UnlockHighlight(); f.Set1Btn.Text:SetTextColor(1,1,0); f.Set2Btn.Text:SetTextColor(1,1,1)
@@ -1017,16 +1018,16 @@ function SGF.InitLaboratoryView(parent)
     f.ScoreVal1 = C:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal1:SetPoint("TOP", C, "TOPLEFT", dollX[1] + DOLL_W / 2, scoreY); f.ScoreVal1:SetText("0"); f.ScoreVal1:SetTextColor(1,1,0)
     f.ScoreVal2 = C:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal2:SetPoint("TOP", C, "TOPLEFT", dollX[2] + DOLL_W / 2, scoreY); f.ScoreVal2:SetText("0"); f.ScoreVal2:SetTextColor(1,1,0)
 
-    f.DiffVal = C:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge"); f.DiffVal:SetPoint("TOP", C, "TOP", 0, scoreY - 64); f.DiffVal:SetText("Ready")
+    f.DiffVal = C:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge"); f.DiffVal:SetPoint("TOP", C, "TOP", 0, scoreY - 64); f.DiffVal:SetText(L["Ready"])
 
     local slotHint = C:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    slotHint:SetPoint("BOTTOM", 0, 12); slotHint:SetText("Right-click or shift-click a slot to empty it"); slotHint:SetTextColor(0.5, 0.5, 0.5)
+    slotHint:SetPoint("BOTTOM", 0, 12); slotHint:SetText(L["Right-click or shift-click a slot to empty it"]); slotHint:SetTextColor(0.5, 0.5, 0.5)
 
     -- ==========================================
     -- RIGHT: STAT COMPARISON
     -- ==========================================
     local statHdr = R:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    statHdr:SetPoint("TOPLEFT", 12, -12); statHdr:SetText("Stat Comparison")
+    statHdr:SetPoint("TOPLEFT", 12, -12); statHdr:SetText(L["Stat Comparison"])
 
     -- Column headings line up with the row columns built in SGF.UpdateStatList
     local headRow = CreateFrame("Frame", nil, R)
@@ -1036,7 +1037,7 @@ function SGF.InitLaboratoryView(parent)
         if rightOff then t:SetPoint("RIGHT", headRow, "RIGHT", rightOff, 0); t:SetWidth(width); t:SetJustifyH("RIGHT")
         else t:SetPoint("LEFT", headRow, "LEFT", 2, 0) end
     end
-    HeadCell("Stat"); HeadCell("Set 1", SGF.STAT_COL_V1, SGF.STAT_COL_W); HeadCell("Set 2", SGF.STAT_COL_V2, SGF.STAT_COL_W); HeadCell("Diff", SGF.STAT_COL_DIFF, SGF.STAT_COL_W)
+    HeadCell(L["Stat"]); HeadCell(L["Set 1"], SGF.STAT_COL_V1, SGF.STAT_COL_W); HeadCell(L["Set 2"], SGF.STAT_COL_V2, SGF.STAT_COL_W); HeadCell(L["Diff"], SGF.STAT_COL_DIFF, SGF.STAT_COL_W)
 
     local scroll = CreateFrame("ScrollFrame", nil, R, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", headRow, "BOTTOMLEFT", 0, -4); scroll:SetPoint("BOTTOMRIGHT", -34, 12)
@@ -1046,7 +1047,7 @@ function SGF.InitLaboratoryView(parent)
     scroll:SetScrollChild(f.StatScroll.Content)
     f.StatEmpty = R:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.StatEmpty:SetPoint("TOPLEFT", scroll, "TOPLEFT", 2, -4); f.StatEmpty:SetWidth(LAB_RIGHT_W - 50); f.StatEmpty:SetJustifyH("LEFT")
-    f.StatEmpty:SetText("Add items to either set to compare their stats."); f.StatEmpty:SetTextColor(0.6, 0.6, 0.6)
+    f.StatEmpty:SetText(L["Add items to either set to compare their stats."]); f.StatEmpty:SetTextColor(0.6, 0.6, 0.6)
     -- Rows anchor to both edges of the content, so keeping the content as wide as the scroll area keeps every row in step
     scroll:SetScript("OnSizeChanged", function(self, w) if w and w > 50 then f.StatScroll.Content:SetWidth(w) end end)
 
@@ -1062,7 +1063,7 @@ regFrame:SetScript("OnEvent", function()
     local MSC = _G.MSC 
     if not SGJ_LaboratoryDB then SGJ_LaboratoryDB = {} end
     if MSC and MSC.RegisterPluginTab then 
-        MSC.RegisterPluginTab("The Lab", "Interface\\Icons\\INV_Chest_Plate04", SGF.InitLaboratoryView, "ViewLaboratory", "UpdateLaboratory")
+        MSC.RegisterPluginTab(L["The Lab"], "Interface\\Icons\\INV_Chest_Plate04", SGF.InitLaboratoryView, "ViewLaboratory", "UpdateLaboratory")
         if MSC.RenderSidebarButtons then MSC.RenderSidebarButtons() end
         
         if type(SetItemRef) == "function" then

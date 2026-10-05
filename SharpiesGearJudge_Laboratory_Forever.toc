@@ -1,9 +1,17 @@
 ## Interface: 16001
 ## Title: Sharpie's Gear Judge [Laboratory] (Forever Edition)
-## Version: 3.0.8-Forever
+## Version: 3.0.9-Forever
 ## Author: Supersharpie
 ## Dependencies: SharpiesGearJudge
 ## SavedVariables: SGJ_LaboratoryDB
 ## X-Curse-Project-ID: 1451485
 
+Locales\deDE.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\frFR.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\koKR.lua
+Locales\zhTW.lua
 Laboratory.lua

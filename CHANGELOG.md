@@ -1,3 +1,10 @@
+## 🚀 v3.0.9
+
+### 🌍 Translations
+- **Translated**: The Laboratory is now translated into every language WoW Forever launches with: German, Spanish (Spain and Latin America), French, Brazilian Portuguese, Russian, Korean and Traditional Chinese.
+
+-------------------------------------------------------------------------
+
 ## 🚀 v3.0.8
 
 ### 🖼️ Redesigned for the Bigger Window
