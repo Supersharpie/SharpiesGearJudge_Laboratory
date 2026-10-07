@@ -2,8 +2,12 @@ local addonName, SGF = ...
 local L = (_G.MSC and _G.MSC.L) or setmetatable({}, { __index = function(t, k) return k end })
 SGF.LabItems = { [1]={}, [2]={} }
 SGF.ActiveSet = 1 -- Which set is currently receiving inputs?
-SGF.StatRows = {} 
-SGF.SelectedProfile = nil
+SGF.StatRows = {}
+-- Each set's scoring profile: nil follows the main addon; "P:<profile key>",
+-- "R:<leveling role>" or "B:<Talents build id>" pick one for that set
+SGF.SetProfiles = {}
+SGF.LookLevel = nil -- Level the sets are scored at; nil = your own level
+SGF.Results = {}
 
 -- [[ TEXTURE MAP ]]
 SGF.SlotTextures = {
@@ -186,59 +190,499 @@ function SGF.ClearLab(setIdx)
     end
 end
 
-function SGF.CalculateLabScore()
-    local MSC = _G.MSC 
-    if not MSC or not MSC.ViewLaboratory or not MSC.ViewLaboratory.ScoreVal1 then return end
+-- [[ 2.5 SCENARIO ENGINE ]]
+-- Each set is scored with its own profile, at the look-ahead level, with its
+-- enchants as linked or the best available. Weights for another level are
+-- rebuilt from the class's leveling data with that level passed in; the game's
+-- UnitLevel is never replaced (writing that global would taint it for
+-- Blizzard's own code).
+SGF.SlotIDs = {
+    HeadSlot=1, NeckSlot=2, ShoulderSlot=3, BackSlot=15, ChestSlot=5,
+    WristSlot=9, HandsSlot=10, WaistSlot=6, LegsSlot=7, FeetSlot=8,
+    Finger0Slot=11, Finger1Slot=12, Trinket0Slot=13, Trinket1Slot=14,
+    MainHandSlot=16, SecondaryHandSlot=17, RangedSlot=18
+}
+-- Slots the Receipt counts as missing an enchant when empty of one
+local ENCHANT_SLOTS = { [1]=true, [3]=true, [5]=true, [7]=true, [8]=true, [9]=true, [10]=true, [15]=true, [16]=true, [17]=true }
 
-    local weights, profileName
-    if SGF.SelectedProfile and SGF.SelectedProfile ~= "Global" then
-        profileName = SGF.SelectedProfile
-        if MSC.CurrentClass and MSC.CurrentClass.Weights and MSC.CurrentClass.Weights[profileName] then
-            weights = MSC.CurrentClass.Weights[profileName]
+function SGF.MaxLevel()
+    local MSC = _G.MSC
+    return (MSC and MSC.IsTBC) and 70 or 60
+end
+
+function SGF.GetLookLevel()
+    return SGF.LookLevel or UnitLevel("player") or 1
+end
+
+-- Lab options kept across sessions (enchant view)
+function SGF.GetOptions()
+    if not SGJ_LaboratoryDB then SGJ_LaboratoryDB = {} end
+    SGJ_LaboratoryDB.Options = SGJ_LaboratoryDB.Options or {}
+    return SGJ_LaboratoryDB.Options
+end
+
+-- "Leveling_Tank_21_40" -> "Leveling_Tank", 21, 40
+local function ParseBand(key)
+    local role, lo, hi = string.match(key or "", "^(.-)_(%d+)_(%d+)$")
+    if role then return role, tonumber(lo), tonumber(hi) end
+end
+
+-- The role's band that holds the level; outside every band, the nearest one
+-- below it (or the first band)
+local function FindBand(rows, role, level)
+    if not rows or not role then return nil end
+    local below, belowLo, first, firstLo
+    for k in pairs(rows) do
+        local r, lo, hi = ParseBand(k)
+        if r == role then
+            if level >= lo and level <= hi then return k end
+            if lo <= level and (not belowLo or lo > belowLo) then below, belowLo = k, lo end
+            if not firstLo or lo < firstLo then first, firstLo = k, lo end
+        end
+    end
+    return below or first
+end
+
+-- Raw weights for a profile key at a level, and the key they belong to
+local function RawAtLevel(key, level)
+    local MSC = _G.MSC
+    local cls = MSC.CurrentClass
+    if not cls or not key then return nil, key end
+    local role = ParseBand(key)
+
+    -- TBC leveling brackets slide from Start to End across the bracket
+    if role and cls.LevelingBrackets and cls.LevelingBrackets[key] then
+        local k = FindBand(cls.LevelingBrackets, role, level) or key
+        local b = cls.LevelingBrackets[k]
+        local t = (b.max and b.min and b.max > b.min) and (level - b.min) / (b.max - b.min) or 0
+        t = math.max(0, math.min(1, t))
+        local out = {}
+        for s in pairs(b.Start or {}) do out[s] = true end
+        for s in pairs(b.End or {}) do out[s] = true end
+        for s in pairs(out) do
+            local a, e = (b.Start and b.Start[s]) or 0, (b.End and b.End[s]) or 0
+            out[s] = math.max(0, a + (e - a) * t)
+        end
+        return out, k
+    end
+
+    -- Forever / Era leveling rows; Forever reads the per-spec curve at the level
+    if role and cls.LevelingWeights and cls.LevelingWeights[key] then
+        local rows = cls.LevelingWeights
+        local k = FindBand(rows, role, level) or key
+        local _, _, hi = ParseBand(k)
+        -- A chain that changes name (Paladin 41-51 -> Ret 52-59)
+        while hi and level > hi and cls.LevelingNext and cls.LevelingNext[k] and rows[cls.LevelingNext[k]] do
+            k = cls.LevelingNext[k]; _, _, hi = ParseBand(k)
+        end
+        if MSC.IsForever and MSC.EvaluateLevelingCurve then
+            local r = ParseBand(k)
+            local curves = cls.LevelingCurves
+            local curve = curves and (curves[r] or (MSC.LevelingCurveAlias and curves[MSC.LevelingCurveAlias[r] or ""]))
+            if curve then return MSC.EvaluateLevelingCurve(curve, level), k end
+        end
+        return rows[k], k
+    end
+
+    -- Raid, custom and other profiles don't change with level
+    local raw, specKey, mathSpec = MSC:LookupRawWeights(key)
+    return raw, mathSpec or specKey or key
+end
+
+-- Leveling rows of the class (Forever/Era LevelingWeights, TBC LevelingBrackets)
+local function LevelingRows()
+    local cls = _G.MSC.CurrentClass
+    return cls and (cls.LevelingBrackets or cls.LevelingWeights)
+end
+
+-- Weights for a set: its own profile at the look-ahead level.
+-- Returns weights, profile key.
+function SGF.ResolveWeights(setIdx, level)
+    local MSC = _G.MSC
+    local cls = MSC.CurrentClass
+    local myLevel = UnitLevel("player") or 1
+    level = level or SGF.GetLookLevel()
+    local sel = SGF.SetProfiles[setIdx]
+    local key
+
+    if not sel then
+        local w, k = MSC.GetCurrentWeights()
+        if level == myLevel or not k then return w, k end
+        key = k
+        -- At 60 a Talents build's raid profile takes over, as in the main addon
+        local endgame = MSC.TalentBuildRole and MSC.TalentBuildRole.endgame
+        if level >= 60 and endgame and cls and cls.Weights and cls.Weights[endgame] and ParseBand(key) then key = endgame end
+    else
+        local kind, val = sel:match("^(%a):(.+)$")
+        if kind == "P" then
+            key = val
+        elseif kind == "R" then
+            key = FindBand(LevelingRows(), val, level)
+        elseif kind == "B" then
+            local b = _G.SGJ_Talents and _G.SGJ_Talents.Builds and _G.SGJ_Talents.Builds[val]
+            if b then
+                if level >= 60 and b.endgame and cls and cls.Weights and cls.Weights[b.endgame] then
+                    key = b.endgame
+                else
+                    key = FindBand(LevelingRows(), b.leveling or "Leveling", level) or FindBand(LevelingRows(), "Leveling", level)
+                end
+            end
+        end
+    end
+
+    if not key then return MSC.GetCurrentWeights() end
+    local raw, k = RawAtLevel(key, level)
+    if not raw then return MSC.GetCurrentWeights() end
+    local w = MSC:ApplyWeightPipeline(raw, k)
+    return w, k
+end
+
+-- A leveling role's name without its level range ("Leveling: Tank (21-40)" -> "Leveling: Tank")
+local function RoleLabel(role)
+    local MSC = _G.MSC
+    local names = MSC.CurrentClass and MSC.CurrentClass.PrettyNames
+    local key = FindBand(LevelingRows(), role, UnitLevel("player") or 1)
+    local name = key and names and names[key]
+    if name then return (name:gsub("%s*%(%d+%s*%-%s*%d+%)%s*$", "")) end
+    return role
+end
+
+function SGF.ProfileLabel(sel)
+    local MSC = _G.MSC
+    if not sel then return L["Follow Main Addon"] end
+    local kind, val = sel:match("^(%a):(.+)$")
+    if kind == "P" then
+        return (MSC.CurrentClass and MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[val]) or val
+    elseif kind == "R" then
+        return RoleLabel(val)
+    elseif kind == "B" then
+        local b = _G.SGJ_Talents and _G.SGJ_Talents.Builds and _G.SGJ_Talents.Builds[val]
+        return b and b.name and ((MSC.ClassL and MSC.ClassL(b.class, b.name)) or L[b.name]) or val
+    end
+    return sel
+end
+
+-- Dropdown entries: Talents builds, leveling roles, then raid and custom profiles
+function SGF.ProfileChoices()
+    local MSC = _G.MSC
+    local cls = MSC.CurrentClass
+    local out = {}
+    local _, myClass = UnitClass("player")
+
+    local T = _G.SGJ_Talents
+    if T and T.BuildList then
+        local builds = {}
+        for _, b in ipairs(T.BuildList) do
+            if b.class == myClass then table.insert(builds, { text = (MSC.ClassL and MSC.ClassL(b.class, b.name)) or L[b.name], sel = "B:" .. b.id }) end
+        end
+        if #builds > 0 then
+            table.insert(out, { text = L["Talent Builds"], title = true })
+            for _, e in ipairs(builds) do table.insert(out, e) end
+        end
+    end
+
+    local rows = LevelingRows()
+    if rows then
+        -- A role made only of chain continuations (Paladin's Ret 52-59) is part of another role
+        local continues = {}
+        for _, nextKey in pairs((cls and cls.LevelingNext) or {}) do continues[nextKey] = true end
+        local own = {}
+        for k in pairs(rows) do
+            local r = ParseBand(k)
+            if r and not continues[k] then own[r] = true end
+        end
+        local seen, roles = {}, {}
+        for k in pairs(rows) do
+            local r = ParseBand(k)
+            if r and own[r] and not seen[r] then seen[r] = true; table.insert(roles, { text = RoleLabel(r), sel = "R:" .. r }) end
+        end
+        table.sort(roles, function(a, b) return a.text < b.text end)
+        if #roles > 0 then
+            table.insert(out, { text = L["Leveling Roles"], title = true })
+            for _, e in ipairs(roles) do table.insert(out, e) end
+        end
+    end
+
+    local profiles, seen = {}, {}
+    local function AddKey(k)
+        if seen[k] then return end
+        seen[k] = true
+        table.insert(profiles, { text = SGF.ProfileLabel("P:" .. k), sel = "P:" .. k })
+    end
+    if cls and cls.Weights then for k in pairs(cls.Weights) do AddKey(k) end end
+    if SharpiesGearJudgeDB and SharpiesGearJudgeDB.customWeights then
+        for k in pairs(SharpiesGearJudgeDB.customWeights) do AddKey(k) end
+    end
+    table.sort(profiles, function(a, b) return a.text < b.text end)
+    if #profiles > 0 then
+        table.insert(out, { text = L["Profiles"], title = true })
+        for _, e in ipairs(profiles) do table.insert(out, e) end
+    end
+    return out
+end
+
+-- Runs fn with the main addon's enchant setting switched (1 = none, 3 = best).
+-- The setting is part of the scorer's cache key, so nothing cached goes stale.
+local function WithEnchantMode(mode, fn, ...)
+    local s = SGJ_Settings
+    if not s then return fn(...) end
+    local old = s.EnchantMode
+    s.EnchantMode = mode
+    local ok, a, b = pcall(fn, ...)
+    s.EnchantMode = old
+    if not ok then error(a, 0) end
+    return a, b
+end
+
+local function EnchantOf(link)
+    return tonumber(link and link:match("item:%d+:(%d+)") or 0) or 0
+end
+
+-- Score with each item's own enchant (the main addon's "Current" setting would
+-- use the enchant on YOUR equipped item in that slot instead)
+local function ScoreLinked(gear, w, key)
+    local MSC = _G.MSC
+    local score, stats = MSC:GetTotalCharacterScore(gear, w, key)
+    stats = stats or {}
+    for _, link in pairs(gear) do
+        local data = MSC.EnchantDB and MSC.EnchantDB[EnchantOf(link)]
+        if data and data.stats then
+            score = score + (MSC.GetItemScore(data.stats, w) or 0)
+            for s, v in pairs(data.stats) do stats[s] = (stats[s] or 0) + v end
+        end
+    end
+    return score, stats
+end
+
+local function ScoreBest(gear, w, key)
+    return _G.MSC:GetTotalCharacterScore(gear, w, key)
+end
+
+local function HitRating(t, spellOnly)
+    if not t then return 0 end
+    local MSC = _G.MSC
+    if spellOnly and not MSC.IsForever then return t["ITEM_MOD_HIT_SPELL_RATING_SHORT"] or 0 end
+    return (t["ITEM_MOD_HIT_RATING_SHORT"] or 0) + (t["ITEM_MOD_HIT_SPELL_RATING_SHORT"] or 0)
+        + (t["ITEM_MOD_HIT_MELEE_RATING_SHORT"] or 0) + (t["ITEM_MOD_HIT_RANGED_RATING_SHORT"] or 0)
+end
+
+local function EquippedGear()
+    local gear = {}
+    for _, id in pairs(SGF.SlotIDs) do gear[id] = GetInventoryItemLink("player", id) end
+    return gear
+end
+
+-- Hit and defense for a set: your live values (talents, race and buffs
+-- included) plus the difference between the set's gear and what you wear
+local function CapLines(stats, liveStats, key, level)
+    local MSC = _G.MSC
+    local lines = {}
+    local _, class = UnitClass("player")
+    local role = MSC.GetRingRole and MSC.GetRingRole(class, key) or "melee"
+    local myLevel = UnitLevel("player") or 1
+    local lvl = math.min(level, SGF.MaxLevel())
+
+    -- The table's low-level rows are missing or zero (level 8 is all zeros):
+    -- use the first level at or above this one that has a real value
+    local function TBCScalar(statKey)
+        local idx = MSC.RatingIndexMap and MSC.RatingIndexMap[statKey]
+        local t = MSC.CombatRatingScalars
+        if idx and t then
+            for l = math.max(1, math.min(lvl, 70)), 70 do
+                local v = t[l] and t[l][idx]
+                if v and v > 0 then return v end
+            end
+        end
+        return 15.8
+    end
+
+    if role == "melee" or role == "hunter" or role == "caster" then
+        local spell = (role == "caster")
+        local kind = spell and "SPELL" or ((class == "HUNTER" and not tostring(key or ""):upper():find("MELEE")) and "RANGED" or "MELEE")
+        local delta = HitRating(stats, spell) - HitRating(liveStats, spell)
+        local cur, target
+        if MSC.IsForever then
+            cur = MSC:GetForeverHitPercent(kind) + delta / 10 -- 10 Hit Rating = 1% at every level
+            target = MSC.GetForeverCapTarget(spell and "SPELL" or "MELEE", level)
         else
-            weights, profileName = MSC.GetCurrentWeights()
+            local live = spell and (GetSpellHitModifier and GetSpellHitModifier() or 0) or (GetHitModifier and GetHitModifier() or 0)
+            if MSC.IsTBC then
+                local cr = spell and 8 or (kind == "RANGED" and 7 or 6)
+                live = live + (GetCombatRatingBonus and GetCombatRatingBonus(cr) or 0)
+                cur = live + delta / TBCScalar(spell and "ITEM_MOD_HIT_SPELL_RATING_SHORT" or "ITEM_MOD_HIT_RATING_SHORT")
+            else
+                cur = live + delta -- Era gear gives hit in percent
+            end
+            target = spell and 16 or 9
         end
-    else
-        weights, profileName = MSC.GetCurrentWeights()
+        table.insert(lines, { label = spell and L["Spell Hit"] or L["Hit"], cur = cur, target = target, pct = true })
     end
-    
-    local dispName = (MSC.CurrentClass and MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[profileName]) or profileName
-    UIDropDownMenu_SetText(MSC.ViewLaboratory.SpecDD, dispName)
 
-    -- Define Slot Map
-    local slotMap = { 
-        HeadSlot=1, NeckSlot=2, ShoulderSlot=3, BackSlot=15, ChestSlot=5, 
-        WristSlot=9, HandsSlot=10, WaistSlot=6, LegsSlot=7, FeetSlot=8, 
-        Finger0Slot=11, Finger1Slot=12, Trinket0Slot=13, Trinket1Slot=14, 
-        MainHandSlot=16, SecondaryHandSlot=17, RangedSlot=18 
-    }
+    if role == "tank" then
+        local base, mod = UnitDefense("player")
+        local live = (MSC.SanitizeStat and (MSC.SanitizeStat(base) + MSC.SanitizeStat(mod))) or ((base or 0) + (mod or 0))
+        local dKey = "ITEM_MOD_DEFENSE_SKILL_RATING_SHORT"
+        local delta = ((stats and stats[dKey]) or 0) - ((liveStats and liveStats[dKey]) or 0)
+        local scalar = MSC.IsTBC and TBCScalar(dKey) or 1 -- Forever: 1 rating = 1 skill; Era gear gives skill
+        local cur = live + math.floor(delta / scalar) + 5 * (lvl - math.min(myLevel, SGF.MaxLevel()))
+        local target
+        if MSC.IsForever then target = MSC.GetForeverDefenseTarget(level) else target = lvl * 5 + 140 end
+        table.insert(lines, { label = L["Defense"], cur = cur, target = target })
+    end
+    return lines
+end
 
-    -- Helper to calc score for a set index
-    local function GetSetScore(idx)
-        local gear = {}
-        for sName, link in pairs(SGF.LabItems[idx]) do
-            if link and slotMap[sName] then gear[slotMap[sName]] = link end
+-- "Hit 7.2/9% -1.8": red below the target, green at it, yellow more than 1% past it
+local function FormatCap(c)
+    local function Num(v) return c.pct and string.format("%.1f", v) or string.format("%d", v) end
+    local unit = c.pct and "%" or ""
+    if not c.target or c.target <= 0 then
+        return string.format("|cffaaaaaa%s %s%s|r", c.label, Num(c.cur), unit)
+    end
+    local tgt = c.pct and string.format("%g", math.floor(c.target * 10 + 0.5) / 10) or string.format("%d", c.target)
+    local gap = c.cur - c.target
+    local color = "55ff55"
+    if gap < -(c.pct and 0.05 or 0.5) then color = "ff5555"
+    elseif c.pct and gap > 1 then color = "ffd100" end
+    local tail = (math.abs(gap) >= (c.pct and 0.05 or 0.5)) and (" " .. (gap > 0 and "+" or "-") .. Num(math.abs(gap))) or ""
+    return string.format("|cff%s%s %s/%s%s%s|r", color, c.label, Num(c.cur), tgt, unit, tail)
+end
+
+-- Scores one set. Returns { score, stats, key, slots = {slotName = score}, missing, enchGain, caps }
+local oneItem = {}
+function SGF.EvaluateSet(idx, level)
+    local MSC = _G.MSC
+    local w, key = SGF.ResolveWeights(idx, level)
+    if not w then return nil end
+    local bestView = (SGF.GetOptions().EnchantView == "best")
+    local scorer = bestView and ScoreBest or ScoreLinked
+    local mode = bestView and 3 or 1
+
+    local gear = {}
+    for sName, link in pairs(SGF.LabItems[idx]) do
+        if link and SGF.SlotIDs[sName] then gear[SGF.SlotIDs[sName]] = link end
+    end
+
+    -- Set bonuses are scored from a shared table; fill it with this set's weights
+    if MSC.UpdateSetBonusScores then MSC:UpdateSetBonusScores(w) end
+
+    local r = { key = key, slots = {}, missing = 0 }
+    r.score, r.stats = WithEnchantMode(mode, scorer, gear, w, key)
+    local linked = bestView and WithEnchantMode(1, ScoreLinked, gear, w, key) or r.score
+    local best = bestView and r.score or WithEnchantMode(3, ScoreBest, gear, w, key)
+    r.enchGain = (best or 0) - (linked or 0)
+
+    -- Hit past a cap is worth less (Forever: the same correction tooltips use).
+    -- That correction is built from your own level's hit cap, so it is left
+    -- out when the sets are scored at another level.
+    local _, liveStats = WithEnchantMode(mode, scorer, EquippedGear(), w, key)
+    local atOwnLevel = math.min(level, SGF.MaxLevel()) == math.min(UnitLevel("player") or 1, SGF.MaxLevel())
+    if MSC.IsForever and MSC.ForeverHitCapCorrection and next(gear) and atOwnLevel then
+        local correction = MSC.ForeverHitCapCorrection(w, HitRating(liveStats), HitRating(r.stats))
+        r.score = r.score + (correction or 0)
+    end
+    r.caps = next(gear) and CapLines(r.stats, liveStats, key, level) or {}
+
+    for sName, slotID in pairs(SGF.SlotIDs) do
+        local link = SGF.LabItems[idx][sName]
+        if link then
+            wipe(oneItem); oneItem[slotID] = link
+            r.slots[sName] = WithEnchantMode(mode, scorer, oneItem, w, key) or 0
+            local _, _, _, _, _, _, _, _, loc = GetItemInfo(link)
+            if ENCHANT_SLOTS[slotID] and loc ~= "INVTYPE_HOLDABLE" and EnchantOf(link) == 0 then r.missing = r.missing + 1 end
         end
-        return MSC:GetTotalCharacterScore(gear, weights, profileName)
+    end
+    r.weights = w
+    return r
+end
+
+-- Item score on each slot; items above the scoring level are tinted red
+function SGF.RefreshSlotMarks(setIdx)
+    local MSC = _G.MSC
+    local view = MSC and MSC.ViewLaboratory
+    if not view or not view.Slots then return end
+    local res = SGF.Results[setIdx]
+    local level = SGF.GetLookLevel()
+    for sName, btn in pairs(view.Slots[setIdx]) do
+        local link = SGF.LabItems[setIdx][sName]
+        if link then
+            local s = res and res.slots[sName]
+            btn.ScoreText:SetText(s and string.format("%.0f", s) or "")
+            local req = select(5, GetItemInfo(link))
+            btn.TooHigh = (req and req > level) and req or nil
+            if btn.TooHigh then btn.Icon:SetVertexColor(1, 0.3, 0.3) else btn.Icon:SetVertexColor(1, 1, 1) end
+        else
+            btn.ScoreText:SetText("")
+            btn.TooHigh = nil
+            btn.Icon:SetVertexColor(1, 1, 1)
+        end
+    end
+end
+
+function SGF.CalculateLabScore()
+    local MSC = _G.MSC
+    if not MSC or not MSC.ViewLaboratory or not MSC.ViewLaboratory.ScoreVal1 then return end
+    local view = MSC.ViewLaboratory
+    local level = SGF.GetLookLevel()
+
+    for idx = 1, 2 do
+        SGF.Results[idx] = SGF.EvaluateSet(idx, level)
+        if view.ProfileDD and view.ProfileDD[idx] then UIDropDownMenu_SetText(view.ProfileDD[idx], SGF.ProfileLabel(SGF.SetProfiles[idx])) end
+    end
+    -- Give the shared set-bonus table back to the main addon's own weights
+    if MSC.UpdateSetBonusScores then MSC:UpdateSetBonusScores((MSC.GetCurrentWeights())) end
+
+    local r1, r2 = SGF.Results[1], SGF.Results[2]
+    local s1, s2 = r1 and r1.score or 0, r2 and r2.score or 0
+    view.ScoreVal1:SetText(string.format("%.1f", s1))
+    view.ScoreVal2:SetText(string.format("%.1f", s2))
+
+    -- Hit/defense and enchant lines under each set
+    for idx = 1, 2 do
+        local r, info = SGF.Results[idx], view.SetInfo and view.SetInfo[idx]
+        if info then
+            local hasItems = next(SGF.LabItems[idx]) ~= nil
+            for i = 1, 2 do
+                local c = hasItems and r and r.caps[i]
+                info.Cap[i]:SetText(c and FormatCap(c) or "")
+            end
+            if hasItems and r then
+                if r.missing > 0 then
+                    info.Ench:SetText(string.format(L["|cffffd100%d unenchanted|r (%+.1f)"], r.missing, r.enchGain))
+                elseif r.enchGain > 0.05 then
+                    info.Ench:SetText(string.format(L["|cffaaaaaaBetter enchants: %+.1f|r"], r.enchGain))
+                else
+                    info.Ench:SetText(L["|cff55ff55Enchants: best|r"])
+                end
+            else
+                info.Ench:SetText("")
+            end
+        end
+        SGF.RefreshSlotMarks(idx)
     end
 
-    local s1, stats1 = GetSetScore(1)
-    local s2, stats2 = GetSetScore(2)
-
-    -- Update UI Scores
-    MSC.ViewLaboratory.ScoreVal1:SetText(string.format("%.1f", s1))
-    MSC.ViewLaboratory.ScoreVal2:SetText(string.format("%.1f", s2))
-    
-    local diff = s2 - s1
-    if diff > 0.1 then
-        MSC.ViewLaboratory.DiffVal:SetText(string.format(L["Set 2 is |cff00ff00+%.1f|r better"], diff))
-    elseif diff < -0.1 then
-        MSC.ViewLaboratory.DiffVal:SetText(string.format(L["Set 1 is |cff00ff00+%.1f|r better"], math.abs(diff)))
+    -- Totals from two different profiles aren't on the same scale
+    if r1 and r2 and r1.key ~= r2.key and next(SGF.LabItems[1]) and next(SGF.LabItems[2]) then
+        view.DiffVal:SetText(L["|cffffd100Different profiles:|r compare the item scores"])
     else
-        MSC.ViewLaboratory.DiffVal:SetText(L["|cff888888Sets are Equal|r"])
+        local diff = s2 - s1
+        if diff > 0.1 then
+            view.DiffVal:SetText(string.format(L["Set 2 is |cff00ff00+%.1f|r better"], diff))
+        elseif diff < -0.1 then
+            view.DiffVal:SetText(string.format(L["Set 1 is |cff00ff00+%.1f|r better"], math.abs(diff)))
+        else
+            view.DiffVal:SetText(L["|cff888888Sets are Equal|r"])
+        end
     end
 
-    SGF.UpdateStatList(stats1, stats2, weights)
+    SGF.UpdateStatList(r1 and r1.stats or {}, r2 and r2.stats or {}, (SGF.Results[SGF.ActiveSet] or r1 or {}).weights or {})
+end
+
+-- Recalculate once a slider stops moving
+function SGF.QueueRecalc()
+    if SGF.RecalcPending then return end
+    SGF.RecalcPending = true
+    C_Timer.After(0.15, function() SGF.RecalcPending = nil; SGF.CalculateLabScore() end)
 end
 
 -- Stat comparison columns, measured from the right edge of each row (headings in InitLaboratoryView use the same values)
@@ -341,7 +785,17 @@ end
 -- [[ 4. SAVE / LOAD / DELETE / EXPORT ]]
 function SGF.GetCharDB()
     if not SGJ_LaboratoryDB then SGJ_LaboratoryDB = {} end
-    local key = UnitName("player") .. " - " .. GetRealmName()
+    -- Full name (WoW Forever names have two parts; UnitName gives only the first).
+    local MSC = _G.MSC
+    local name = (MSC and MSC.GetCharacterName and MSC.GetCharacterName()) or UnitName("player")
+    local key = name .. " - " .. GetRealmName()
+    local legacy = UnitName("player") .. " - " .. GetRealmName()
+    if not SGJ_LaboratoryDB[key] and legacy ~= key and SGJ_LaboratoryDB[legacy] then
+        -- copy the sets saved under the old first-name key (several characters may share it)
+        local copy = {}
+        for k, v in pairs(SGJ_LaboratoryDB[legacy]) do copy[k] = v end
+        SGJ_LaboratoryDB[key] = copy
+    end
     if not SGJ_LaboratoryDB[key] then SGJ_LaboratoryDB[key] = {} end
     return SGJ_LaboratoryDB[key]
 end
@@ -618,22 +1072,39 @@ local function IsUniqueItem(link)
     return unique
 end
 
+-- Is the bag item already bound to you? Unbound gear (Bind on Equip) asks
+-- for a confirmation before it equips, which a script can't answer.
+local function IsBagItemBound(bag, slot)
+    if C_Container and C_Container.GetContainerItemInfo then
+        local info = C_Container.GetContainerItemInfo(bag, slot)
+        if type(info) == "table" and info.isBound ~= nil then return info.isBound and true or false end
+    end
+    if C_Item and C_Item.IsBound and ItemLocation and ItemLocation.CreateFromBagAndSlot then
+        local ok, bound = pcall(C_Item.IsBound, ItemLocation:CreateFromBagAndSlot(bag, slot))
+        if ok and bound ~= nil then return bound and true or false end
+    end
+    local tip = _G["SGF_UniqueScanTooltip"] or CreateFrame("GameTooltip", "SGF_UniqueScanTooltip", nil, "GameTooltipTemplate")
+    tip:SetOwner(WorldFrame, "ANCHOR_NONE"); tip:ClearLines()
+    if not tip.SetBagItem or not pcall(tip.SetBagItem, tip, bag, slot) then return false end
+    for i = 2, math.min(tip:NumLines(), 6) do
+        local fs = _G["SGF_UniqueScanTooltipTextLeft" .. i]
+        local text = fs and fs:GetText()
+        if text then
+            for _, m in ipairs({ "ITEM_SOULBOUND", "ITEM_ACCOUNTBOUND", "ITEM_BNETACCOUNTBOUND" }) do
+                if _G[m] and text == _G[m] then return true end
+            end
+        end
+    end
+    return false
+end
+
 function SGF.ScanBestInBags(autoEquip)
     local MSC = _G.MSC
     if not MSC or not MSC.GetTotalCharacterScore then return end
 
     local setIdx = SGF.ActiveSet
-    local weights, profileName
-    if SGF.SelectedProfile and SGF.SelectedProfile ~= "Global" then
-        profileName = SGF.SelectedProfile
-        if MSC.CurrentClass and MSC.CurrentClass.Weights and MSC.CurrentClass.Weights[profileName] then
-            weights = MSC.CurrentClass.Weights[profileName]
-        else
-            weights, profileName = MSC.GetCurrentWeights()
-        end
-    else
-        weights, profileName = MSC.GetCurrentWeights()
-    end
+    -- The set's own profile; equipping for real always scores at your own level
+    local weights, profileName = SGF.ResolveWeights(setIdx, (not autoEquip) and SGF.GetLookLevel() or UnitLevel("player"))
 
     if not weights then print(L["|cffff0000SGJ:|r No active stat weights found."]); return end
 
@@ -647,13 +1118,16 @@ function SGF.ScanBestInBags(autoEquip)
     local bagItems = {}
     local getLink = (C_Container and C_Container.GetContainerItemLink) or GetContainerItemLink
     local getSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+    -- Equipping needs your real level; the Lab's look-ahead level otherwise
+    local levelLimit = autoEquip and (UnitLevel("player") or 1) or SGF.GetLookLevel()
     for bag = 0, 4 do
         for slot = 1, getSlots(bag) do
             local link = getLink(bag, slot)
             if link then
-                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(link)
-                -- Gear the character can't wear would only fail to equip
-                if equipLoc and equipLoc ~= "" and (not MSC.IsItemUsable or MSC.IsItemUsable(link)) then
+                local _, _, _, _, reqLevel, _, _, _, equipLoc = GetItemInfo(link)
+                -- Gear the character can't wear (or can't wear yet) would only fail to equip
+                if equipLoc and equipLoc ~= "" and (reqLevel or 0) <= levelLimit
+                    and (not MSC.IsItemUsable or MSC.IsItemUsable(link)) then
                     table.insert(bagItems, {link=link, loc=equipLoc, id=tonumber(link:match("item:(%d+)")), bag=bag, slot=slot})
                 end
             end
@@ -806,11 +1280,28 @@ function SGF.ScanBestInBags(autoEquip)
             if InCombatLockdown() then
                 print(L["|cffff0000SGJ:|r Cannot equip items while in combat."])
             else
-                print(string.format(L["|cff00ff00SGJ:|r Equipping %d upgrades from bags..."], itemsSwapped))
+                -- Unbound gear (Bind on Equip) opens a "will bind to you" confirmation;
+                -- equipping the next item would cancel it. Those are listed for you to
+                -- equip yourself; bound gear is equipped straight away.
+                local toEquip, toConfirm = {}, {}
+                for slotName, link in pairs(itemsToEquip) do
+                    local src = usedBy[slotName]
+                    if src and src.bag and not IsBagItemBound(src.bag, src.slot) then
+                        table.insert(toConfirm, link)
+                    else
+                        toEquip[slotName] = link
+                    end
+                end
+                local nEquip = 0
+                for _ in pairs(toEquip) do nEquip = nEquip + 1 end
+
+                if nEquip > 0 then
+                    print(string.format(L["|cff00ff00SGJ:|r Equipping %d upgrades from bags..."], nEquip))
+                end
                 -- Equip from the exact bag slot: by name, two copies of one weapon
                 -- could both resolve to the same bag item
                 local pickup = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
-                for slotName, link in pairs(itemsToEquip) do
+                for slotName, link in pairs(toEquip) do
                     local slotID = GetInventorySlotInfo(slotName)
                     local src = usedBy[slotName]
                     if src and src.bag and pickup and EquipCursorItem then
@@ -821,11 +1312,17 @@ function SGF.ScanBestInBags(autoEquip)
                         EquipItemByName(link, slotID)
                     end
                 end
-                
-                C_Timer.After(0.5, function()
-                    SGF.ImportEquipped()
-                    print(L["|cff00ff00SGJ:|r Active Lab Set updated to match your newly equipped gear."])
-                end)
+                if #toConfirm > 0 then
+                    print(string.format(L["|cffffd100SGJ:|r %d upgrades will bind to you when equipped. Equip them yourself:"], #toConfirm))
+                    for _, link in ipairs(toConfirm) do print("   " .. link) end
+                end
+
+                if nEquip > 0 then
+                    C_Timer.After(0.5, function()
+                        SGF.ImportEquipped()
+                        print(L["|cff00ff00SGJ:|r Active Lab Set updated to match your newly equipped gear."])
+                    end)
+                end
             end
         else
             print(string.format(L["|cff00ff00SGJ:|r Best in Bag applied! Found %d upgrades for Set %d."], itemsSwapped, setIdx))
@@ -836,11 +1333,129 @@ function SGF.ScanBestInBags(autoEquip)
     end
 end
 
+-- Fills a set from a slot ID -> link table, keeping the two-hand rule
+local function FillSetFromSlots(setIdx, bySlotID)
+    SGF.LabItems[setIdx] = {}
+    for sName, id in pairs(SGF.SlotIDs) do
+        local link = bySlotID[id]
+        if link then SGF.LabItems[setIdx][sName] = link; GetItemInfo(link) end
+    end
+    local mh = SGF.LabItems[setIdx].MainHandSlot
+    if mh and select(9, GetItemInfo(mh)) == "INVTYPE_2HWEAPON" then SGF.LabItems[setIdx].SecondaryHandSlot = nil end
+    for _, s in ipairs(SGF.OrderedSlots) do SGF.UpdateLabSlot(s, setIdx) end
+    SGF.CalculateLabScore()
+end
+
+-- [[ 4.6 ROADMAP GOAL SET ]]
+-- Your gear with the Roadmap's picks swapped in: the whole chained set in
+-- Chain Mode, otherwise the picks for the dungeon selected in the Roadmap.
+function SGF.LoadRoadmapPicks()
+    local MSC = _G.MSC
+    local R = MSC and MSC.Roadmap
+    if not R then print(L["|cffff0000SGJ:|r The Roadmap plugin isn't loaded."]); return end
+    local setIdx = SGF.ActiveSet
+    local gear = EquippedGear()
+    local swapped = 0
+
+    if R.ChainMode and R.VirtualGear and next(R.VirtualGear) then
+        -- Only the Lab's own slots (no shirt or tabard)
+        for _, id in pairs(SGF.SlotIDs) do
+            if R.VirtualGear[id] ~= gear[id] then swapped = swapped + 1 end
+            gear[id] = R.VirtualGear[id]
+        end
+    else
+        if not R.ScanResults or not next(R.ScanResults) then
+            print(L["|cffff0000SGJ:|r Pick a dungeon in the Roadmap first (or build a set with its Chain Mode)."])
+            return
+        end
+        for id, list in pairs(R.ScanResults) do
+            local i = (R.BestIndices and R.BestIndices[id]) or 1
+            local pick = i ~= -1 and list[i]
+            if pick and pick.gain and pick.gain > 0 then gear[id] = pick.link; swapped = swapped + 1 end
+        end
+        -- A dual-wield pick shows its partner weapon (ForcedPairs); a two-hander empties the off hand
+        if R.ForcedPairs then
+            for id, link in pairs(R.ForcedPairs) do gear[id] = link end
+        end
+    end
+
+    FillSetFromSlots(setIdx, gear)
+    print(string.format(L["|cff00ff00SGJ:|r Roadmap picks loaded into Set %d (%d slots changed)."], setIdx, swapped))
+end
+
+-- [[ 4.7 INSPECT TO LAB ]]
+local inspectFrame = CreateFrame("Frame")
+SGF.PendingInspect = nil
+
+local function FinishInspect(tries)
+    local p = SGF.PendingInspect
+    if not p then return end
+    local unit = (UnitGUID("target") == p.guid) and "target" or nil
+    if not unit then
+        SGF.PendingInspect = nil
+        print(L["|cffff0000SGJ:|r Lost your target before their gear arrived."])
+        return
+    end
+    -- Links can arrive a moment after the item IDs; wait for them a few times
+    local gear, missing = {}, false
+    for _, id in pairs(SGF.SlotIDs) do
+        local link = GetInventoryItemLink(unit, id)
+        if link then gear[id] = link
+        elseif GetInventoryItemID and GetInventoryItemID(unit, id) then missing = true end
+    end
+    if missing and tries < 5 then
+        C_Timer.After(0.3, function() FinishInspect(tries + 1) end)
+        return
+    end
+
+    SGF.PendingInspect = nil
+    inspectFrame:UnregisterEvent("INSPECT_READY")
+    FillSetFromSlots(p.set, gear)
+    if ClearInspectPlayer and not (InspectFrame and InspectFrame:IsShown()) then ClearInspectPlayer() end
+
+    print(string.format(L["|cff00ff00SGJ:|r %s's gear loaded into Set %d."], p.name, p.set))
+    local _, myClass = UnitClass("player")
+    if p.class ~= myClass then
+        print(L["|cffffd100SGJ:|r Different class: their gear is scored with your profile."])
+    end
+end
+
+inspectFrame:SetScript("OnEvent", function(_, event, guid)
+    if event == "INSPECT_READY" and SGF.PendingInspect and guid == SGF.PendingInspect.guid then
+        FinishInspect(0)
+    end
+end)
+
+function SGF.InspectTarget()
+    if not UnitExists("target") or not UnitIsPlayer("target") then
+        print(L["|cffff0000SGJ:|r Target a player to inspect first."])
+        return
+    end
+    if UnitIsUnit("target", "player") then SGF.ImportEquipped(); return end
+    if not NotifyInspect or (CanInspect and not CanInspect("target")) then
+        print(L["|cffff0000SGJ:|r Can't inspect that player (too far away?)."])
+        return
+    end
+
+    local guid = UnitGUID("target")
+    local _, class = UnitClass("target")
+    SGF.PendingInspect = { guid = guid, set = SGF.ActiveSet, name = UnitName("target"), class = class }
+    inspectFrame:RegisterEvent("INSPECT_READY")
+    NotifyInspect("target")
+    C_Timer.After(4, function()
+        if SGF.PendingInspect and SGF.PendingInspect.guid == guid then
+            SGF.PendingInspect = nil
+            inspectFrame:UnregisterEvent("INSPECT_READY")
+            print(L["|cffff0000SGJ:|r Inspect timed out. Move closer and try again."])
+        end
+    end)
+end
+
 -- [[ 4.8 IN-GAME HELP MENU ]]
 function SGF.ToggleHelp()
     if not SGF.HelpFrame then
         local f = CreateFrame("Frame", "SGJ_LabHelpFrame", UIParent, "BackdropTemplate")
-        f:SetSize(450, 420)
+        f:SetSize(480, 560)
         f:SetPoint("CENTER")
         f:SetFrameStrata("DIALOG")
         
@@ -857,9 +1472,16 @@ function SGF.ToggleHelp()
         title:SetPoint("TOP", 0, -20)
         title:SetText(L["The Laboratory - How to Use"])
         
-        local text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        text:SetPoint("TOPLEFT", 25, -55)
-        text:SetPoint("BOTTOMRIGHT", -25, 50)
+        -- The text scrolls, so longer translations aren't cut off
+        local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", 25, -55)
+        scroll:SetPoint("BOTTOMRIGHT", -45, 55)
+        local content = CreateFrame("Frame", nil, scroll)
+        content:SetSize(410, 10)
+        scroll:SetScrollChild(content)
+        local text = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("TOPLEFT", 0, 0)
+        text:SetWidth(405)
         text:SetJustifyH("LEFT")
         text:SetJustifyV("TOP")
         
@@ -869,14 +1491,23 @@ function SGF.ToggleHelp()
             L["  • |cff00ff00Shift-Click|r: Click any item in your bags, chat, or AtlasLoot to add it to the active set."] .. "\n" ..
             L["  • |cff00ff00Equipped|r: Pulls all gear currently worn by your character into the active set."] .. "\n" ..
             L["  • |cff00ff00Best in Bag|r: Scans your bags to build the highest-scoring set possible. |cffaaaaaa(Shift-Click this to physically evaluate and equip your character's best gear!)|r"] .. "\n" ..
-			L["  • |cff00ff00Import Str|r: Paste data directly from SeventyUpgrades (JSON) or SimC/Raidbots."] .. "\n\n" ..
+			L["  • |cff00ff00Import Str|r: Paste data directly from SeventyUpgrades (JSON) or SimC/Raidbots."] .. "\n" ..
+            L["  • |cff00ff00Roadmap Picks|r: Your gear with the Roadmap's recommended upgrades swapped in."] .. "\n" ..
+            L["  • |cff00ff00Inspect Target|r: Loads the gear of the player you have targeted."] .. "\n\n" ..
             L["|cffffff00Comparing Sets:|r"] .. "\n" ..
-            L["Toggle between |cff00ff00Set 1|r and |cff00ff00Set 2|r using the buttons above the paper dolls. The scrollable stat panel on the right will display a color-coded breakdown of the stat differences between the two sets."] .. "\n\n" ..
+            L["Toggle between |cff00ff00Set 1|r and |cff00ff00Set 2|r using the buttons above the paper dolls. The scrollable stat panel on the right will display a color-coded breakdown of the stat differences between the two sets."] .. "\n" ..
+            L["Each set has its own profile, so the same gear can be scored for another spec or Talents build. The small number on each item is its own score."] .. "\n" ..
+            L["Under each score: hit or defense against its target, and missing enchants."] .. "\n\n" ..
+            L["|cffffff00What If:|r"] .. "\n" ..
+            L["The level slider scores both sets at another level. Items you can't wear yet at that level are tinted red. |cff00ff00As Linked|r scores each item's own enchant; |cff00ff00Best Enchants|r fills every slot with the best one for your level."] .. "\n\n" ..
             L["|cffffff00Saving & Loading:|r"] .. "\n" ..
             L["Type a name into the text box and click |cff00ff00Save|r to store your theorycrafted set locally. Use the dropdown to load it later."]
             
         text:SetText(instructions)
-        
+        content:SetHeight(math.ceil(text:GetStringHeight()) + 10)
+        -- Font metrics can settle after the first frame; size again when shown
+        f:SetScript("OnShow", function() content:SetHeight(math.ceil(text:GetStringHeight()) + 10) end)
+
         local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         closeBtn:SetSize(100, 25)
         closeBtn:SetPoint("BOTTOM", 0, 20)
@@ -951,17 +1582,38 @@ function SGF.InitLaboratoryView(parent)
     end)
     f.HelpBtn:SetScript("OnLeave", GameTooltip_Hide)
 
-    local profLbl = LCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profLbl:SetPoint("TOPLEFT", f.Title, "BOTTOMLEFT", 0, -12); profLbl:SetText(L["Scoring Profile"]); profLbl:SetTextColor(0.6, 0.6, 0.6)
-    f.SpecDD = CreateFrame("Frame", "SGJ_LaboratorySpecDD", LCol, "UIDropDownMenuTemplate"); f.SpecDD:SetPoint("TOPLEFT", profLbl, "BOTTOMLEFT", -18, -2)
-    UIDropDownMenu_SetWidth(f.SpecDD, BTN_W - 16); UIDropDownMenu_SetText(f.SpecDD, L["Follow Main Addon"])
-	UIDropDownMenu_Initialize(f.SpecDD, function(self, level)
-        local info = UIDropDownMenu_CreateInfo(); info.text = L["Follow Main Addon"]; info.func = function() SGF.SelectedProfile = "Global"; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == "Global" or SGF.SelectedProfile == nil); UIDropDownMenu_AddButton(info, level)
-        if MSC.CurrentClass and MSC.CurrentClass.Weights then for k, v in pairs(MSC.CurrentClass.Weights) do local info = UIDropDownMenu_CreateInfo(); local pretty = (MSC.CurrentClass.PrettyNames and MSC.CurrentClass.PrettyNames[k]) or k; info.text = pretty; info.func = function() SGF.SelectedProfile = k; SGF.CalculateLabScore() end; info.checked = (SGF.SelectedProfile == k); UIDropDownMenu_AddButton(info, level) end end
-    end)
+    -- A profile per set: the same gear can be scored for another spec or Talents build
+    f.ProfileDD = {}
+    local profAnchor = f.Title
+    for setIdx = 1, 2 do
+        local lbl = LCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", profAnchor, "BOTTOMLEFT", setIdx == 1 and 0 or 18, setIdx == 1 and -12 or -4)
+        lbl:SetText(string.format(L["Set %d Profile"], setIdx)); lbl:SetTextColor(0.6, 0.6, 0.6)
+        local dd = CreateFrame("Frame", "SGJ_LaboratoryProfileDD" .. setIdx, LCol, "UIDropDownMenuTemplate")
+        dd:SetPoint("TOPLEFT", lbl, "BOTTOMLEFT", -18, -2)
+        UIDropDownMenu_SetWidth(dd, BTN_W - 16); UIDropDownMenu_SetText(dd, L["Follow Main Addon"])
+        UIDropDownMenu_Initialize(dd, function(self, level)
+            local function Add(text, sel, isTitle)
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = text
+                if isTitle then
+                    info.isTitle = true; info.notCheckable = true
+                else
+                    info.func = function() SGF.SetProfiles[setIdx] = sel; SGF.CalculateLabScore() end
+                    info.checked = (SGF.SetProfiles[setIdx] == sel)
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+            Add(L["Follow Main Addon"], nil)
+            for _, e in ipairs(SGF.ProfileChoices()) do Add(e.text, e.sel, e.title) end
+        end)
+        f.ProfileDD[setIdx] = dd
+        profAnchor = dd
+    end
 
     -- Add items to the active set
-    local hAdd = Header(L["Add to Active Set"], profLbl, -46)
+    local hAdd = Header(L["Add to Active Set"], f.ProfileDD[2], -8)
+    hAdd:SetPoint("TOPLEFT", f.ProfileDD[2], "BOTTOMLEFT", 18, -8)
     f.ActiveLbl = LCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.ActiveLbl:SetPoint("TOPLEFT", hAdd, "BOTTOMLEFT", 0, -3)
     f.ActiveLbl:SetWidth(BTN_W); f.ActiveLbl:SetJustifyH("LEFT"); f.ActiveLbl:SetTextColor(0.6, 0.6, 0.6)
     f.ActiveLbl:SetText(L["Shift-click items in your bags or chat. Pick the set with its button above the gear."])
@@ -986,8 +1638,28 @@ function SGF.InitLaboratoryView(parent)
 
     f.ImpStrBtn = Button(L["Import String"], f.BagBtn, -4, function() local p = SGF.CreateCopyPastePopup(); p.EditBox:SetText(""); p.ImportBtn:Show(); p.Title:SetText(string.format(L["Paste to Set %d"], SGF.ActiveSet)); p.EditBox:SetFocus(); p:Show() end)
 
+    f.RoadmapBtn = Button(L["Roadmap Picks"], f.ImpStrBtn, -4, function() SGF.LoadRoadmapPicks() end)
+    f.RoadmapBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L["Roadmap Picks"])
+        GameTooltip:AddLine(L["Your gear with the Roadmap's recommended upgrades swapped in."], 1, 1, 1, true)
+        GameTooltip:AddLine(L["Uses the dungeon selected in the Roadmap, or the whole set built in its Chain Mode."], 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    f.RoadmapBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+    f.InspectBtn = Button(L["Inspect Target"], f.RoadmapBtn, -4, function() SGF.InspectTarget() end)
+    f.InspectBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L["Inspect Target"])
+        GameTooltip:AddLine(L["Loads the gear of the player you have targeted."], 1, 1, 1, true)
+        GameTooltip:AddLine(L["Their gear is scored with your profile."], 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    f.InspectBtn:SetScript("OnLeave", GameTooltip_Hide)
+
     -- Manage both sets
-    local hManage = Header(L["Manage"], f.ImpStrBtn, -14)
+    local hManage = Header(L["Manage"], f.InspectBtn, -14)
     f.CopyBtn = Button(L["Copy Set 1 to Set 2"], hManage, -6, function() SGF.CopySet1To2() end)
     f.ShareBtn = Button(L["Export Active Set"], f.CopyBtn, -4, function() local p = SGF.CreateCopyPastePopup(); local s = SGF.SerializeSet(); p.EditBox:SetText(s); p.EditBox:HighlightText(); p.ImportBtn:Hide(); p.Title:SetText(string.format(L["Export Set %d"], SGF.ActiveSet)); p:Show() end)
     f.ClearBtn = Button(L["Clear All"], f.ShareBtn, -4, function() SGF.ClearLab(nil) end)
@@ -1023,7 +1695,7 @@ function SGF.InitLaboratoryView(parent)
     f.SetPanels = {}
     for setIdx = 1, 2 do
         local p = CreateFrame("Frame", nil, C)
-        p:SetPoint("TOPLEFT", dollX[setIdx] - 10, -8); p:SetSize(DOLL_W + 20, 450)
+        p:SetPoint("TOPLEFT", dollX[setIdx] - 10, -8); p:SetSize(DOLL_W + 20, 476)
         p.Fill = p:CreateTexture(nil, "BACKGROUND"); p.Fill:SetAllPoints(); p.Fill:SetColorTexture(1, 1, 1, 0.02)
         p.Edge = {}
         for i, pts in ipairs({ {"TOPLEFT","TOPRIGHT"}, {"BOTTOMLEFT","BOTTOMRIGHT"}, {"TOPLEFT","BOTTOMLEFT"}, {"TOPRIGHT","BOTTOMRIGHT"} }) do
@@ -1057,12 +1729,22 @@ function SGF.InitLaboratoryView(parent)
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn.Icon = btn:CreateTexture(nil, "ARTWORK"); btn.Icon:SetAllPoints(); btn.Icon:SetTexture(SGF.SlotTextures[slotName])
             btn.Border = btn:CreateTexture(nil, "OVERLAY"); btn.Border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border"); btn.Border:SetBlendMode("ADD"); btn.Border:SetAlpha(0.4); btn.Border:SetAllPoints(); btn.Border:Hide()
+            -- The item's own score with this set's profile
+            btn.ScoreText = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+            btn.ScoreText:SetPoint("BOTTOMRIGHT", -1, 2)
             btn:SetScript("OnClick", function(self, button)
                 local t,_,l = GetCursorInfo()
                 if t=="item" then SGF.ActiveSet = setIdx; UpdateActiveSetUI(); SGF.ReceiveLink(l); ClearCursor()
                 elseif button == "RightButton" or IsShiftKeyDown() then SGF.LabItems[setIdx][slotName] = nil; SGF.UpdateLabSlot(slotName, setIdx); SGF.CalculateLabScore() end
             end)
-            btn:SetScript("OnEnter", function(s) if s.link then GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:SetHyperlink(s.link); GameTooltip:Show() end; btn.Border:Show() end)
+            btn:SetScript("OnEnter", function(s)
+                if s.link then
+                    GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:SetHyperlink(s.link)
+                    if s.TooHigh then GameTooltip:AddLine(string.format(L["Needs level %d (scoring at %d)"], s.TooHigh, SGF.GetLookLevel()), 1, 0.3, 0.3) end
+                    GameTooltip:Show()
+                end
+                btn.Border:Show()
+            end)
             btn:SetScript("OnLeave", function() GameTooltip_Hide(); btn.Border:Hide() end)
             f.Slots[setIdx][slotName] = btn
         end
@@ -1073,10 +1755,88 @@ function SGF.InitLaboratoryView(parent)
     f.ScoreVal1 = C:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal1:SetPoint("TOP", C, "TOPLEFT", dollX[1] + DOLL_W / 2, scoreY); f.ScoreVal1:SetText("0"); f.ScoreVal1:SetTextColor(1,1,0)
     f.ScoreVal2 = C:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"); f.ScoreVal2:SetPoint("TOP", C, "TOPLEFT", dollX[2] + DOLL_W / 2, scoreY); f.ScoreVal2:SetText("0"); f.ScoreVal2:SetTextColor(1,1,0)
 
-    f.DiffVal = C:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge"); f.DiffVal:SetPoint("TOP", C, "TOP", 0, scoreY - 64); f.DiffVal:SetText(L["Ready"])
+    -- Under each score: up to two cap lines (hit, defense) and the enchant line
+    f.SetInfo = {}
+    for setIdx = 1, 2 do
+        local info = { Cap = {} }
+        local x = dollX[setIdx] + DOLL_W / 2
+        for i = 1, 3 do
+            local t = C:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            t:SetPoint("TOP", C, "TOPLEFT", x, scoreY - 28 - (i - 1) * 13)
+            t:SetWidth(DOLL_W + 40); t:SetWordWrap(false)
+            if i < 3 then info.Cap[i] = t else info.Ench = t end
+        end
+        f.SetInfo[setIdx] = info
+    end
+
+    f.DiffVal = C:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); f.DiffVal:SetPoint("TOP", C, "TOP", 0, scoreY - 82); f.DiffVal:SetWidth(centerW - 20); f.DiffVal:SetText(L["Ready"])
+
+    -- What-if controls: scoring level and enchant view
+    local maxLevel = SGF.MaxLevel()
+    local slider = CreateFrame("Slider", "SGJ_LabLevelSlider", C, "OptionsSliderTemplate")
+    slider:SetPoint("TOP", C, "TOP", -22, scoreY - 128); slider:SetWidth(200)
+    slider:SetMinMaxValues(1, maxLevel); slider:SetValueStep(1)
+    if slider.SetObeyStepOnDrag then slider:SetObeyStepOnDrag(true) end
+    _G[slider:GetName() .. "Low"]:SetText("1"); _G[slider:GetName() .. "High"]:SetText(tostring(maxLevel))
+    f.LevelSlider = slider
+    function SGF.UpdateLevelText()
+        local me, lvl = UnitLevel("player") or 1, SGF.GetLookLevel()
+        local text = _G[slider:GetName() .. "Text"]
+        if lvl == me then text:SetText(string.format(L["Score at level %d"], lvl))
+        else text:SetText(string.format(L["Score at level %d |cffaaaaaa(you: %d)|r"], lvl, me)) end
+    end
+    slider:SetScript("OnValueChanged", function(self, v)
+        if SGF.SyncingSlider then return end
+        v = math.floor(v + 0.5)
+        SGF.LookLevel = (v ~= UnitLevel("player")) and v or nil
+        SGF.UpdateLevelText()
+        SGF.QueueRecalc()
+    end)
+    slider:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L["Level Look-Ahead"])
+        GameTooltip:AddLine(L["Scores both sets with the stat weights of another level. Items you can't wear yet at that level are tinted red."], 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    slider:SetScript("OnLeave", GameTooltip_Hide)
+
+    f.LevelResetBtn = CreateFrame("Button", nil, C, "UIPanelButtonTemplate")
+    f.LevelResetBtn:SetSize(44, 20); f.LevelResetBtn:SetPoint("LEFT", slider, "RIGHT", 10, 0); f.LevelResetBtn:SetText(L["Now"])
+    f.LevelResetBtn:SetScript("OnClick", function() SGF.LookLevel = nil; SGF.SyncLevelSlider(); SGF.CalculateLabScore() end)
+    f.LevelResetBtn:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText(L["Back to your own level"]); GameTooltip:Show() end)
+    f.LevelResetBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+    function SGF.SyncLevelSlider()
+        SGF.SyncingSlider = true
+        slider:SetValue(SGF.GetLookLevel())
+        SGF.SyncingSlider = nil
+        SGF.UpdateLevelText()
+    end
+    SGF.SyncLevelSlider()
+
+    -- Enchant view: each item's own enchant, or the best one for every slot
+    f.EnchBtns = {}
+    local function UpdateEnchantButtons()
+        local best = (SGF.GetOptions().EnchantView == "best")
+        for view, b in pairs(f.EnchBtns) do
+            local on = (view == "best") == best
+            if on then b:LockHighlight(); b.Text:SetTextColor(1, 1, 0) else b:UnlockHighlight(); b.Text:SetTextColor(1, 1, 1) end
+        end
+    end
+    local function EnchButton(view, text, tip, xOff)
+        local b = CreateFrame("Button", nil, C, "UIPanelButtonTemplate")
+        b:SetSize(160, 22); b:SetPoint("TOP", C, "TOP", xOff, scoreY - 170); b:SetText(text)
+        b:SetScript("OnClick", function() SGF.GetOptions().EnchantView = (view == "best") and "best" or nil; UpdateEnchantButtons(); SGF.CalculateLabScore() end)
+        b:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText(text); GameTooltip:AddLine(tip, 1, 1, 1, true); GameTooltip:Show() end)
+        b:SetScript("OnLeave", GameTooltip_Hide)
+        f.EnchBtns[view] = b
+    end
+    EnchButton("linked", L["As Linked"], L["Scores each item with the enchant it has (or none)."], -83)
+    EnchButton("best", L["Best Enchants"], L["Scores every enchantable slot with the best enchant for your level."], 83)
+    UpdateEnchantButtons()
 
     local slotHint = C:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    slotHint:SetPoint("BOTTOM", 0, 12); slotHint:SetText(L["Right-click or shift-click a slot to empty it"]); slotHint:SetTextColor(0.5, 0.5, 0.5)
+    slotHint:SetPoint("BOTTOM", 0, 8); slotHint:SetText(L["Right-click or shift-click a slot to empty it"]); slotHint:SetTextColor(0.5, 0.5, 0.5)
 
     -- ==========================================
     -- RIGHT: STAT COMPARISON
@@ -1107,9 +1867,36 @@ function SGF.InitLaboratoryView(parent)
     scroll:SetScript("OnSizeChanged", function(self, w) if w and w > 50 then f.StatScroll.Content:SetWidth(w) end end)
 
 	MSC.ViewLaboratory = f
+    f:SetScript("OnShow", function()
+        SGF.itemInfoFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+        SGF.UpdateLaboratory()
+    end)
+    f:SetScript("OnHide", function() SGF.itemInfoFrame:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end)
 end
 
-function SGF.UpdateLaboratory() end
+-- Items the game hasn't sent yet (inspected or imported gear) score 0 at
+-- first; while the Lab is open, rescore once their data arrives.
+SGF.itemInfoFrame = CreateFrame("Frame")
+SGF.itemInfoFrame:SetScript("OnEvent", function(_, _, itemID, success)
+    itemID = tonumber(itemID)
+    if not itemID or success == false then return end
+    local hit = false
+    for idx = 1, 2 do
+        for sName, link in pairs(SGF.LabItems[idx]) do
+            if link and tonumber(link:match("item:(%d+)")) == itemID then
+                SGF.UpdateLabSlot(sName, idx)
+                hit = true
+            end
+        end
+    end
+    if hit then SGF.QueueRecalc() end
+end)
+
+-- Each time the tab opens: you may have levelled or changed talents since
+function SGF.UpdateLaboratory()
+    if SGF.SyncLevelSlider then SGF.SyncLevelSlider() end
+    SGF.CalculateLabScore()
+end
 
 -- [[ 6. HOOKS ]]
 local regFrame = CreateFrame("Frame")
@@ -1121,29 +1908,46 @@ regFrame:SetScript("OnEvent", function()
         MSC.RegisterPluginTab(L["The Lab"], "Interface\\Icons\\INV_Chest_Plate04", SGF.InitLaboratoryView, "ViewLaboratory", "UpdateLaboratory")
         if MSC.RenderSidebarButtons then MSC.RenderSidebarButtons() end
         
+        local function LabOpen()
+            return MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK")
+        end
+        -- One click can reach several of the hooks below (a bag click runs both
+        -- the bag button's handler and HandleModifiedItemClick): take the item
+        -- once per click. Keyed by the item string, since some hooks get the
+        -- full link and others only "item:...".
+        local lastKey, lastTime
+        local function Take(link)
+            if type(link) ~= "string" or not link:find("item:", 1, true) then return end
+            local key, now = link:match("item:[%-%d:]+") or link, GetTime()
+            if key == lastKey and now == lastTime then return end
+            lastKey, lastTime = key, now
+            SGF.ReceiveLink(link)
+        end
+        local function BagButtonLink(self)
+            local b = self.GetBagID and self:GetBagID() or self:GetParent():GetID()
+            local s = self:GetID()
+            return (C_Container and C_Container.GetContainerItemLink) and C_Container.GetContainerItemLink(b,s) or GetContainerItemLink(b,s)
+        end
+
+        -- Bag addons (Baganator, Bagnon...) and most other item buttons go through this
+        if type(HandleModifiedItemClick) == "function" then
+            hooksecurefunc("HandleModifiedItemClick", function(link) if LabOpen() then Take(link) end end)
+        end
         if type(SetItemRef) == "function" then
-            hooksecurefunc("SetItemRef", function(link) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then SGF.ReceiveLink(link) end end)
+            hooksecurefunc("SetItemRef", function(link) if LabOpen() then Take(link) end end)
         end
         if type(ContainerFrameItemButton_OnModifiedClick) == "function" then
-            hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self) 
-                if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then 
-                    local b,s = self:GetParent():GetID(), self:GetID()
-                    local l = (C_Container and C_Container.GetContainerItemLink) and C_Container.GetContainerItemLink(b,s) or GetContainerItemLink(b,s)
-                    if l then SGF.ReceiveLink(l) end 
-                end 
+            hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self)
+                if LabOpen() then Take(BagButtonLink(self)) end
             end)
         end
         if type(ContainerFrameItemButtonTemplate_OnModifiedClick) == "function" then
-            hooksecurefunc("ContainerFrameItemButtonTemplate_OnModifiedClick", function(self) 
-                if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then 
-                    local b,s = self:GetParent():GetID(), self:GetID()
-                    local l = (C_Container and C_Container.GetContainerItemLink) and C_Container.GetContainerItemLink(b,s) or GetContainerItemLink(b,s)
-                    if l then SGF.ReceiveLink(l) end 
-                end 
+            hooksecurefunc("ContainerFrameItemButtonTemplate_OnModifiedClick", function(self)
+                if LabOpen() then Take(BagButtonLink(self)) end
             end)
         end
         if type(PaperDollItemSlotButton_OnModifiedClick) == "function" then
-            hooksecurefunc("PaperDollItemSlotButton_OnModifiedClick", function(self) if MSC.ViewLaboratory and MSC.ViewLaboratory:IsShown() and IsModifiedClick("CHATLINK") then local link = GetInventoryItemLink("player", self:GetID()); if link then SGF.ReceiveLink(link) end end end)
+            hooksecurefunc("PaperDollItemSlotButton_OnModifiedClick", function(self) if LabOpen() then Take(GetInventoryItemLink("player", self:GetID())) end end)
         end
     end
 end)

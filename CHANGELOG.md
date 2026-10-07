@@ -1,4 +1,40 @@
-## 🚀 v3.0.9
+# Sharpie's Gear Judge [Laboratory] - Version History
+
+## 🚀 v3.1.0
+
+### 🔮 Level Look-Ahead
+- **Score at Any Level**: A level slider under the sets scores both of them with the stat weights of another level, so you can see whether a piece is worth keeping for later. On Forever the weights come from your spec's per-level curve; on TBC from the level bracket. **Now** returns to your own level.
+- **Too High to Wear**: Items that need a higher level than the one you're scoring at are tinted red, and their tooltip says the level they need.
+
+### 🧬 A Profile for Each Set
+- **Set 1 Profile / Set 2 Profile**: The single Scoring Profile menu is now one per set. Besides your raid profiles, each lists your leveling roles and, with Sharpie's Gear Judge Talents, its builds for your class. Put the same gear in both sets to see how it holds up for another spec or build.
+- **Item Scores**: Each item shows its own score on its icon, using that set's profile.
+- **Different Profiles**: When the two sets use different profiles, their totals are on different scales, so the Lab says so instead of calling one better. The item scores show which pieces don't suit the other build.
+
+### 🗺️ Roadmap Picks
+- **New Button**: Loads your gear with the Roadmap's recommended upgrades swapped in: the picks for the dungeon selected in the Roadmap, or the whole set built in its Chain Mode. See what finishing the Roadmap is worth.
+
+### 🎯 Cap Check
+- **Hit and Defense per Set**: Under each set's score: hit (or spell hit) for damage dealers and defense for tanks, against the same targets as the Stat Logic rings. It starts from your own live numbers (talents and race included) and adds the set's difference from what you wear. Red is short, green is there, yellow is more than 1% past it.
+- **Hit Past the Cap Counts Less (Forever)**: A set's score now discounts hit past your cap, the same correction Gear Judge tooltips use. Before, every point of hit counted fully.
+
+### ✨ Enchants
+- **As Linked / Best Enchants**: Two buttons choose how enchants are scored. As Linked uses each item's own enchant; Best Enchants fills every enchantable slot with the best one for your level. Each set shows how many slots are unenchanted and what the best enchants would add.
+- **Fixed: Other Players' Enchants**: With Gear Judge's enchant setting on "Current", every Lab item was scored with the enchant on *your* equipped item in that slot, not its own. Imported sets now score with their own enchants.
+
+### 👥 Inspect Target
+- **New Button**: Loads your target's gear into the active set. Their gear is scored with your profile, so the Lab warns you when they're a different class.
+
+### 🐛 Bug Fixes
+- **Refresh When Opened**: The Lab now rescores its sets each time you open it, so a level-up or talent change since you last looked is included.
+- **Fixed: Shift-Click From Bag Addons**: Shift-clicking an item in Baganator, Bagnon and other bag addons didn't add it to the Lab. Those clicks now reach the active set, and an item is never added twice when more than one click path fires.
+- **Fixed: Items Scored 0 Until Reopened**: Inspected or imported gear the game hadn't loaded yet scored 0 (and could show a blank icon). While the Lab is open it now rescores, and refreshes the icon, as soon as the item's data arrives.
+- **Fixed: Hit Numbers at Low Levels (TBC)**: The Cap Check could show nonsense hit values at level 8 and below. It now uses the nearest level with real rating data.
+- **Fixed: Hit Cap Correction at Another Level (Forever)**: With the level slider moved, set scores still applied your current level's hit cap. That correction now applies only at your own level.
+- **Fixed: Roadmap Picks Slot Count**: The "(N slots changed)" message counted your shirt. It now counts only the Lab's slots.
+- **Fixed: Talents Build Names Not Translated**: Build names in the set profile menus now show in your language.
+- **Fixed: Help Window Text Cut Off**: The Help window's text now scrolls, so nothing is clipped (longer translations included).
+- **Fixed: Characters With the Same First Name (Forever)**: WoW Forever names have two parts, and characters sharing a first name shared one list of saved sets. Each character now keeps its own; existing sets carry over.
 
 ### 🌍 Translations
 - **Translated**: The Laboratory is now translated into every language WoW Forever launches with: German, Spanish (Spain and Latin America), French, Brazilian Portuguese, Russian, Korean and Traditional Chinese.
@@ -9,6 +45,8 @@
 - **Fixed: Two Copies Only When Unique**: Two copies of the same ring or trinket were never suggested together, even though the game allows it, while two copies of a unique one-hander were. Now a second copy of any ring, trinket or one-hander is suggested unless the item is Unique or Unique-Equipped.
 - **Fixed: Shift-Click With Two Copies**: Shift-Click equipped by item name, so two copies of one weapon could both point at the same bag item. It now equips each item from its own bag slot.
 - **Fixed: Gear You Can't Wear**: Best in Bag could suggest bag items your character can't use (wrong armor type, weapon type or class), which then failed to equip. They're now skipped.
+- **Fixed: Gear You Can't Wear Yet**: A Bind on Equip item above your level (a level-30 item at level 28) could be picked. Best in Bag now skips items above your level when equipping for real (Shift-Click), and above the Lab's look-ahead level when filling a set.
+- **Fixed: Auto-Equip Cancelled Bind Confirmations**: Equipping several Bind on Equip upgrades at once with Shift-Click cancelled each "will bind to you" popup. Gear already bound to you is equipped as before; unbound upgrades are now listed in chat for you to equip yourself.
 
 -------------------------------------------------------------------------
 
