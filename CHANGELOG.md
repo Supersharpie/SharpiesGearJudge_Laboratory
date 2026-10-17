@@ -1,5 +1,9 @@
 # Sharpie's Gear Judge [Laboratory] - Version History
 
+## 🚀 v3.1.1
+
+---
+
 ## 🚀 v3.1.0
 
 ### 🔮 Level Look-Ahead
