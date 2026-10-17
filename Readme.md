@@ -1,6 +1,6 @@
 # Sharpie's Gear Judge [Laboratory]
 
-**Version 3.1.1** | Requires **Sharpie's Gear Judge** | Works on **WoW Forever** and **TBC Anniversary**
+**Version 3.1.0** | Requires **Sharpie's Gear Judge** | Works on **WoW Forever** and **TBC Anniversary**
 
 ## Overview
 * The Laboratory ("The Lab") is a plugin for the Sharpie's Gear Judge (SGJ) addon.
