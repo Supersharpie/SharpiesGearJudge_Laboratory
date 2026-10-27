@@ -2,6 +2,7 @@
 
 ## 🚀 v3.1.1
 
+- New look to match Gear Judge's new window: colored section titles, slimmer bars and your class color as the accent.
 - Retired Gear Judge profiles no longer show in the profile list.
 
 ---
