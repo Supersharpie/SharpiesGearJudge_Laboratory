@@ -409,7 +409,7 @@ function SGF.ProfileChoices()
         seen[k] = true
         table.insert(profiles, { text = SGF.ProfileLabel("P:" .. k), sel = "P:" .. k })
     end
-    if cls and cls.Weights then for k in pairs(cls.Weights) do AddKey(k) end end
+    if cls and cls.Weights then for k in pairs(cls.Weights) do if not (cls.RetiredProfiles and cls.RetiredProfiles[k]) then AddKey(k) end end end
     if SharpiesGearJudgeDB and SharpiesGearJudgeDB.customWeights then
         for k in pairs(SharpiesGearJudgeDB.customWeights) do AddKey(k) end
     end

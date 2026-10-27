@@ -2,6 +2,8 @@
 
 ## 🚀 v3.1.1
 
+- Retired Gear Judge profiles no longer show in the profile list.
+
 ---
 
 ## 🚀 v3.1.0
