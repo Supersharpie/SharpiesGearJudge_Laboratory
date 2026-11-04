@@ -1,6 +1,6 @@
 # Sharpie's Gear Judge [Laboratory]
 
-**Version 3.1.1** | Requires **Sharpie's Gear Judge** | Works on **WoW Forever** and **TBC Anniversary**
+**Version 3.1.2** | Requires **Sharpie's Gear Judge** | Works on **WoW Forever** and **TBC Anniversary**
 
 ## Overview
 * The Laboratory ("The Lab") is a plugin for the Sharpie's Gear Judge (SGJ) addon.
@@ -10,7 +10,7 @@
 ### Features
 * **Dual Set Comparison:** Build two full gear sets (Set 1 and Set 2) and see a direct score comparison.
 * **A Profile for Each Set:** Each set has its own scoring profile: your raid profiles, your leveling roles and, with Sharpie's Gear Judge Talents, its builds for your class. Put the same gear in both sets to see how it holds up for another spec or build. Each item shows its own score on its icon.
-* **Level Look-Ahead:** A level slider scores both sets with the stat weights of another level, so you can see whether a piece is worth keeping for later. Items you can't wear yet at that level are tinted red. **Now** returns to your own level.
+* **Level Look-Ahead:** A level slider scores both sets with the stat weights of another level, so you can see whether a piece is worth keeping for later. Items you can't wear yet at that level are tinted red. **Now** returns to your own level. On WoW Forever the leveling weights also follow your gear, as Gear Judge's tooltips do.
 * **Cap Check:** Under each set's score you see its hit (or spell hit) for damage dealers, or defense for tanks, against the same targets as Gear Judge's Stat Logic rings. Red is short, green is there, yellow is well past it.
 * **Enchants:** **As Linked** scores each item with its own enchant; **Best Enchants** fills every enchantable slot with the best enchant for your level. Each set shows how many slots are unenchanted and what the best enchants would add.
 * **Multi-Format Import:** Import gear from SeventyUpgrades (JSON), SimulationCraft / Raidbots (SimC), plain item lists, or a string exported from the Roadmap or the Lab.
