@@ -289,8 +289,14 @@ local function RawAtLevel(key, level)
         if MSC.IsForever and MSC.EvaluateLevelingCurve then
             local r = ParseBand(k)
             local curves = cls.LevelingCurves
-            local curve = curves and (curves[r] or (MSC.LevelingCurveAlias and curves[MSC.LevelingCurveAlias[r] or ""]))
-            if curve then return MSC.EvaluateLevelingCurve(curve, level), k end
+            local cr = (curves and curves[r]) and r or (MSC.LevelingCurveAlias and MSC.LevelingCurveAlias[r])
+            local curve = curves and cr and curves[cr]
+            if curve then
+                local w = MSC.EvaluateLevelingCurve(curve, level)
+                -- slid toward the quest-gear row by the worn gear, as the tooltips do (MSC.LevelingGearBlend)
+                if MSC.LevelingGearBlend and cls.LevelingGear then w = MSC.LevelingGearBlend(cls.LevelingGear[cr], level, w) end
+                return w, k
+            end
         end
         return rows[k], k
     end

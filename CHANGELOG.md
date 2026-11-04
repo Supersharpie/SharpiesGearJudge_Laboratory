@@ -1,5 +1,11 @@
 # Sharpie's Gear Judge [Laboratory] - Version History
 
+## 🚀 v3.1.2
+
+- On WoW Forever the level slider's leveling weights also account for your gear, as Gear Judge's tooltips now do.
+
+---
+
 ## 🚀 v3.1.1
 
 - New look to match Gear Judge's new window: colored section titles, slimmer bars and your class color as the accent.
