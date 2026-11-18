@@ -289,7 +289,9 @@ local function RawAtLevel(key, level)
         if MSC.IsForever and MSC.EvaluateLevelingCurve then
             local r = ParseBand(k)
             local curves = cls.LevelingCurves
-            local cr = (curves and curves[r]) and r or (MSC.LevelingCurveAlias and MSC.LevelingCurveAlias[r])
+            -- MSC.LevelingCurveRole (2026-11-17): also the PvP twin row while PvP weights are on
+            local cr = MSC.LevelingCurveRole and MSC.LevelingCurveRole(cls, r)
+                or ((curves and curves[r]) and r or (MSC.LevelingCurveAlias and MSC.LevelingCurveAlias[r]))
             local curve = curves and cr and curves[cr]
             if curve then
                 local w = MSC.EvaluateLevelingCurve(curve, level)
@@ -597,6 +599,10 @@ function SGF.EvaluateSet(idx, level)
     if MSC.IsForever and MSC.ForeverHitCapCorrection and next(gear) and atOwnLevel then
         local correction = MSC.ForeverHitCapCorrection(w, HitRating(liveStats), HitRating(r.stats))
         r.score = r.score + (correction or 0)
+        -- expertise on its dodge / parry curve too (2026-11-17)
+        if MSC.ForeverExpertiseCorrection then
+            r.score = r.score + (MSC.ForeverExpertiseCorrection(w, MSC.ExpertiseRatingOf(liveStats), MSC.ExpertiseRatingOf(r.stats)) or 0)
+        end
     end
     r.caps = next(gear) and CapLines(r.stats, liveStats, key, level) or {}
 

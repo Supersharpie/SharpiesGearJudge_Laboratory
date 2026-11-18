@@ -1,5 +1,12 @@
 # Sharpie's Gear Judge [Laboratory] - Version History
 
+## 🚀 v3.1.3
+
+### 🐛 Fixes
+- WoW Forever: Expertise is valued on its cap curve, as the tooltips do.
+
+---
+
 ## 🚀 v3.1.2
 
 - On WoW Forever the level slider's leveling weights also account for your gear, as Gear Judge's tooltips now do.
