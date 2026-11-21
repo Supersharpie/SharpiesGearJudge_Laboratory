@@ -820,8 +820,9 @@ function SGF.GetCharDB()
     -- Full name (WoW Forever names have two parts; UnitName gives only the first).
     local MSC = _G.MSC
     local name = (MSC and MSC.GetCharacterName and MSC.GetCharacterName()) or UnitName("player")
-    local key = name .. " - " .. GetRealmName()
-    local legacy = UnitName("player") .. " - " .. GetRealmName()
+    local realm = (MSC and MSC.GetRealm and MSC.GetRealm()) or GetRealmName() or "?"
+    local key = name .. " - " .. realm
+    local legacy = UnitName("player") .. " - " .. realm
     if not SGJ_LaboratoryDB[key] and legacy ~= key and SGJ_LaboratoryDB[legacy] then
         -- copy the sets saved under the old first-name key (several characters may share it)
         local copy = {}

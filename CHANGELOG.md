@@ -1,5 +1,12 @@
 # Sharpie's Gear Judge [Laboratory] - Version History
 
+## 🚀 v3.1.4
+
+### 🐛 Fixes
+- WoW Forever: your saved sets no longer look gone on logins where the game gives no realm name (needs Gear Judge 3.7.0).
+
+---
+
 ## 🚀 v3.1.3
 
 ### 🐛 Fixes
